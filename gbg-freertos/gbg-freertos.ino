@@ -3,12 +3,13 @@
  **************************************************************************************/
 
 #include <Arduino_FreeRTOS.h>
+#include <LibPrintf.h>
 
 /**************************************************************************************
  * GLOBAL VARIABLES
  **************************************************************************************/
 
-TaskHandle_t loop_task, blinky_task, motor_drive_task;
+TaskHandle_t loop_task, blinky_task, motor_drive_task, joystick_task;
 
 /**************************************************************************************
  * SETUP/LOOP
@@ -19,13 +20,7 @@ void setup()
   Serial.begin(115200);
   while (!Serial) { }
 
-#if defined(ARDUINO_PORTENTA_C33)
-  /* Only the Portenta C33 has an RGB LED. */
-  pinMode(LEDR, OUTPUT);
-  digitalWrite(LEDR, LOW);
-#endif
-
-  /* Init a task that calls 'loop'
+    /* Init a task that calls 'loop'
    * since after the call to
    * 'vTaskStartScheduler' we'll never
    * get out of setup() and therefore
@@ -70,11 +65,26 @@ void setup()
       512 / 4,
       nullptr,
       1,
-      motor_drive_task
+      &motor_drive_task
     );
   
   if (rc_motor_drive != pdPASS) {
-    Serial.println("Failed to create 'motor drive' thread")
+    Serial.println("Failed to create 'motor drive' thread");
+    return;
+  }
+
+  auto const rc_joystick = xTaskCreate
+    (
+      joystick_func,
+      static_cast<const char*>("Joystick Thread"),
+      512/4,
+      nullptr,
+      1,
+      &joystick_task
+    );
+  
+  if (rc_joystick != pdPASS) {
+    Serial.println("Failed to create 'joystick' thread");
     return;
   }
 
@@ -87,12 +97,6 @@ void setup()
 
 void loop()
 {
-#if defined(ARDUINO_PORTENTA_C33)
-  /* Only the Portenta C33 has an RGB LED. */
-  digitalWrite(LEDR, !digitalRead(LEDR));
-#else
-  Serial.println(millis());
-#endif
   vTaskDelay(configTICK_RATE_HZ/4);
 }
 
@@ -176,7 +180,7 @@ void motor_drive_func(void *pvParams)
     
     
     if (leftMotorPower > 0) {
-      leftMotorAppliedPower = map(leftMotorPower, 1, MAX_FWD_LEFT_MOTOR_POWER);
+      leftMotorAppliedPower = constrain(leftMotorPower, 1, MAX_FWD_LEFT_MOTOR_POWER);
       #if REV_LEFT_DRIVE
         digitalWrite(leftMotorDirPin, LOW);
       #else
@@ -184,7 +188,7 @@ void motor_drive_func(void *pvParams)
       #endif
       analogWrite(leftMotorPWMPin, leftMotorAppliedPower);
     } else if (leftMotorPower < 0) {
-      leftMotorAppliedPower = map(abs(leftMotorPower), 1, MAX_BWD_LEFT_MOTOR_POWER);
+      leftMotorAppliedPower = constrain(abs(leftMotorPower), 1, MAX_BWD_LEFT_MOTOR_POWER);
       #if REV_LEFT_DRIVE
         digitalWrite(leftMotorDirPin, HIGH);
       #else
@@ -196,7 +200,7 @@ void motor_drive_func(void *pvParams)
     }
 
     if (rightMotorPower > 0) {
-      rightMotorAppliedPower = map(rightMotorPower, 1, MAX_FWD_RIGHT_MOTOR_POWER);
+      rightMotorAppliedPower = constrain(rightMotorPower, 1, MAX_FWD_RIGHT_MOTOR_POWER);
       #if REV_LEFT_DRIVE
         digitalWrite(rightMotorDirPin, LOW);
       #else
@@ -227,12 +231,27 @@ void motor_drive_func(void *pvParams)
 
 #define FLIP_X_AXIS false
 #define FLIP_Y_AXIS false
+#define X_Y_TRANSPOSE false
+
+#define MAX_X_AXIS 1024
+#define MAX_Y_AXIS 1024
+
+#define MID_X_AXIS 512
+#define MID_Y_AXIS 512
+
+#define MIN_X_AXIS 0
+#define MIN_Y_AXIS 0
+
+#define X_AXIS_DEADZONE 10
+#define Y_AXIS_DEADZONE 10
 
 void joystick_func(void *pvParams)
 {
   // setup()
   int xValue = 0;
   int yValue = 0;
+  int correctedXValue = 0;
+  int correctedYValue= 0;
 
   #if FLIP_X_AXIS
     const int xFlip = -1;
@@ -243,8 +262,15 @@ void joystick_func(void *pvParams)
   #if FLIP_Y_AXIS
     const int yFlip = -1;
   #else
-    cosnt int yFlip = 1;
+    const int yFlip = 1;
   #endif
+
+  int scaledX = 0;
+  int scaledY = 0;
+
+  int maximum = 0;
+  int total = 0;
+  int difference = 0;
 
   for(;;)
   {
@@ -252,6 +278,71 @@ void joystick_func(void *pvParams)
     xValue = analogRead(JOYSTICK_X_AXIS_PIN);
     yValue = analogRead(JOYSTICK_Y_AXIS_PIN);
 
+    correctedXValue = xValue;
+    correctedYValue = yValue;
+
+    // If the joystick values are close to the deadzones, let them be in the dead zone. 
+    // Allows for some buffer.
+    if (xValue - MID_X_AXIS < X_AXIS_DEADZONE && xValue - MID_X_AXIS > -X_AXIS_DEADZONE )
+    {
+        correctedXValue = MID_X_AXIS;
+    }
+    if (yValue - MID_Y_AXIS < Y_AXIS_DEADZONE && yValue - MID_Y_AXIS > -Y_AXIS_DEADZONE )
+    {
+        correctedYValue = MID_Y_AXIS;
+    }
+
+    // Now we need to scale the captured values, to values between -100 and 100.
+    scaledX = map(correctedXValue - MID_X_AXIS, MIN_X_AXIS - MID_X_AXIS, MAX_X_AXIS - MID_X_AXIS, -100, 100);
+    scaledY = map(correctedYValue - MID_Y_AXIS, MIN_Y_AXIS - MID_Y_AXIS, MAX_Y_AXIS - MID_Y_AXIS, -100, 100);
+    
+    scaledX = scaledX * xFlip;
+    scaledY = scaledY * yFlip;
+
+    #if X_Y_TRANSPOSE
+      // Transpose the two axis, don't allocate additional memory.
+      scaledX = scaledX ^ scaledY;
+      scaledY = scaledX ^ scaledY;
+      scaledX = scaledX ^ scaledY;
+    #endif
+
+    printf("X=%d, Y=%d, Xc=%d, Yc=%d, Xs=%d, Ys=%d", xValue, yValue, correctedXValue, correctedYValue, scaledX, scaledY);
+    
+    // Now we have the motor data. We can calculate the arcade drive values.
+    maximum = max(abs(scaledY), abs(scaledX));
+    total =  scaledY + scaledX;
+    difference = scaledY - scaledX;
+
+    if (scaledY >= 0)
+    {
+      if (scaledX >= 0)
+      {
+        // I quadrant
+        leftMotorPower = maximum;
+        rightMotorPower = difference;
+      }
+      else
+      {            
+        // II quadrant
+        leftMotorPower = total;
+        rightMotorPower = maximum;
+      }
+    }
+    else
+    {
+        if (scaledX >= 0)
+        {  
+          // IV quadrant
+          leftMotorPower = total;
+          rightMotorPower = -maximum;
+        }
+        else
+        {
+          // III quadrant
+          leftMotorPower = -maximum;
+          rightMotorPower = difference;
+        }
+    }
 
   }
 }
