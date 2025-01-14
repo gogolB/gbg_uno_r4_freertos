@@ -131,10 +131,10 @@ void blinky_thread_func(void *pvParameters)
 #define REV_LEFT_DRIVE true       // Change these if the motors are wired backwards.
 #define REV_RIGHT_DRIVE true      // Change these if the motors are wired backwards.
 
-const int MAX_FWD_LEFT_MOTOR_POWER = 128;
-const int MAX_FWD_RIGHT_MOTOR_POWER = 128;
-const int MAX_BWD_LEFT_MOTOR_POWER = 128;
-const int MAX_BWD_RIGHT_MOTOR_POWER = 128;
+const int MAX_FWD_LEFT_MOTOR_POWER = 1280;
+const int MAX_FWD_RIGHT_MOTOR_POWER = 1280;
+const int MAX_BWD_LEFT_MOTOR_POWER = 1280;
+const int MAX_BWD_RIGHT_MOTOR_POWER = 1280;
 
 // This is the motor power. A power of greater than 0 is forward.
 // A power of less than 0 is backward.
@@ -167,14 +167,14 @@ void motor_drive_func(void *pvParams)
 
   int leftMotorAppliedPower = 0;
   int rightMotorAppliedPower = 0;
+  int leftMotorDir = 0;
+  int rightMotorDir = 0;
   // loop()
   for(;;)
   {
 
     // Motor power is constrained to between -100% to 100%
     // This is then mapped to the PWM range necessary for use on the motor driver.
-
-
     leftMotorPower = constrain(leftMotorPower, -100, 100);
     rightMotorPower = constrain(rightMotorPower, -100, 100);
     
@@ -182,18 +182,20 @@ void motor_drive_func(void *pvParams)
     if (leftMotorPower > 0) {
       leftMotorAppliedPower = constrain(leftMotorPower, 1, MAX_FWD_LEFT_MOTOR_POWER);
       #if REV_LEFT_DRIVE
-        digitalWrite(leftMotorDirPin, LOW);
+        leftMotorDir = LOW;
       #else
-        digitalWrite(leftMotorDirPin, HIGH);
+        leftMotorDir = HIGH;
       #endif
+      digitalWrite(leftMotorDirPin, leftMotorDir);
       analogWrite(leftMotorPWMPin, leftMotorAppliedPower);
     } else if (leftMotorPower < 0) {
       leftMotorAppliedPower = constrain(abs(leftMotorPower), 1, MAX_BWD_LEFT_MOTOR_POWER);
       #if REV_LEFT_DRIVE
-        digitalWrite(leftMotorDirPin, HIGH);
+        leftMotorDir = HIGH;
       #else
-        digitalWrite(leftMotorDirPin, LOW);
+        leftMotorDir = LOW;
       #endif
+      digitalWrite(leftMotorDirPin, leftMotorDir);
       analogWrite(leftMotorPWMPin, leftMotorAppliedPower);
     } else {
       analogWrite(leftMotorPWMPin, 0);
@@ -202,22 +204,25 @@ void motor_drive_func(void *pvParams)
     if (rightMotorPower > 0) {
       rightMotorAppliedPower = constrain(rightMotorPower, 1, MAX_FWD_RIGHT_MOTOR_POWER);
       #if REV_LEFT_DRIVE
-        digitalWrite(rightMotorDirPin, LOW);
+        rightMotorDir = LOW;
       #else
-        digitalWrite(rightMotorDirPin, HIGH);
+        rightMotorDir = HIGH;
       #endif
+      digitalWrite(rightMotorDirPin, rightMotorDir);
       analogWrite(rightMotorPWMPin, rightMotorAppliedPower);
     } else if (rightMotorPower < 0) {
       rightMotorAppliedPower = constrain(abs(rightMotorPower), 1, MAX_BWD_RIGHT_MOTOR_POWER);
       #if REV_LEFT_DRIVE
-        digitalWrite(rightMotorDirPin, HIGH);
+        rightMotorDir = HIGH;
       #else
-        digitalWrite(rightMotorDirPin, LOW);
+        rightMotorDir = LOW;
       #endif
+      digitalWrite(rightMotorDirPin, rightMotorDir);
       analogWrite(rightMotorPWMPin, rightMotorAppliedPower);
     } else {
       analogWrite(rightMotorPWMPin, 0);
     }
+    printf("[Motor Dr Thread] LMP=%4d, RMP=%4d, | LMAP=%5d, RMAP=%5d LM_DIR=%d, RM_DIR=%d \n", leftMotorPower, rightMotorPower, leftMotorAppliedPower, rightMotorAppliedPower, leftMotorDir, rightMotorDir);
 
     vTaskDelay(configTICK_RATE_HZ);
   }
@@ -236,14 +241,14 @@ void motor_drive_func(void *pvParams)
 #define MAX_X_AXIS 1024
 #define MAX_Y_AXIS 1024
 
-#define MID_X_AXIS 512
-#define MID_Y_AXIS 512
+#define MID_X_AXIS 528
+#define MID_Y_AXIS 1007
 
 #define MIN_X_AXIS 0
-#define MIN_Y_AXIS 0
+#define MIN_Y_AXIS 1000
 
-#define X_AXIS_DEADZONE 10
-#define Y_AXIS_DEADZONE 10
+#define X_AXIS_DEADZONE 20
+#define Y_AXIS_DEADZONE 20
 
 void joystick_func(void *pvParams)
 {
@@ -306,7 +311,7 @@ void joystick_func(void *pvParams)
       scaledX = scaledX ^ scaledY;
     #endif
 
-    printf("X=%d, Y=%d, Xc=%d, Yc=%d, Xs=%d, Ys=%d", xValue, yValue, correctedXValue, correctedYValue, scaledX, scaledY);
+    printf("[Joystick Thread] X=%4d, Y=%4d, Xc=%4d, Yc=%4d, Xs=%4d, Ys=%4d \n", xValue, yValue, correctedXValue, correctedYValue, scaledX, scaledY);
     
     // Now we have the motor data. We can calculate the arcade drive values.
     maximum = max(abs(scaledY), abs(scaledX));
