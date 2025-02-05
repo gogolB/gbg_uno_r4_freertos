@@ -4,12 +4,15 @@
 
 #include <Arduino_FreeRTOS.h>
 #include <LibPrintf.h>
+#include <DualVNH5019MotorShield.h>
+#include <ArduinoBLE.h>
+#include <Preferences.h>
 
 /**************************************************************************************
  * GLOBAL VARIABLES
  **************************************************************************************/
 
-TaskHandle_t loop_task, blinky_task, motor_drive_task, joystick_task;
+TaskHandle_t loop_task, blinky_task, motor_drive_task, joystick_task, ble_server;
 
 /**************************************************************************************
  * SETUP/LOOP
@@ -109,6 +112,10 @@ void loop_thread_func(void *pvParameters)
   }
 }
 
+// ========================================================
+//                     Blink Thread
+// ========================================================
+
 void blinky_thread_func(void *pvParameters)
 {
   /* setup() */
@@ -123,23 +130,146 @@ void blinky_thread_func(void *pvParameters)
   }
 }
 
-// Motor pin definations. Should not be too different given the shield.
-#define MOTOR_A_DIR_PIN 12
-#define MOTOR_B_DIR_PIN 13
-#define MOTOR_A_PWM_PIN 10
-#define MOTOR_B_PWM_PIN 11
-#define REV_LEFT_DRIVE true       // Change these if the motors are wired backwards.
-#define REV_RIGHT_DRIVE true      // Change these if the motors are wired backwards.
+  // ==================================================
+  //                    BLE Server
+  // ==================================================
 
-const int MAX_FWD_LEFT_MOTOR_POWER = 1280;
-const int MAX_FWD_RIGHT_MOTOR_POWER = 1280;
-const int MAX_BWD_LEFT_MOTOR_POWER = 1280;
-const int MAX_BWD_RIGHT_MOTOR_POWER = 1280;
+
+#define FORCE_BLE_RESET false
+
+  BLEService remoteControl("06f3d410-1f9d-4020-b6c0-ad20d295d869");
+  BLEBoolCharacteristic remoteControlEnabled("cc33b6ac-e38e-45ab-a5f4-d39b77928ec9", BLERead | BLEWrite);
+  BLEBoolCharacteristic remoteControlStop("2f81b369-7d9f-4d5e-92fa-1c00c6651b5d", BLERead | BLEWrite);
+  BLEShortCharacteristic remoteControlJoystickX("a204e8f5-cea7-47e8-89eb-59bcc2ba28d1", BLERead | BLEWrite);
+  BLEShortCharacteristic remoteControlJoystickY("2e55d9fb-094e-4a92-a1ca-fe5055d0c54e", BLERead | BLEWrite);
+
+  bool isConnected = false;
+
+  Preferences prefs;
+
+  int remoteX;
+  int remoteY;
+  bool remoteEnabled;
+  bool remoteStop;
+
+  void ble_func(void *pvParams)
+  {
+    // Setup()
+
+
+    remoteX = 0;
+    remoteY = 0;
+    remoteEnabled = false;
+    remoteStop = false;
+
+    if (!BLE.begin()) 
+    {
+      Serial.println("Starting BLE failed!");
+      while (1);
+    }
+
+    BLE.setLocalName("EnMed-GBG-Car-V1.0");
+    BLE.setAdvertisedService(remoteControl);
+    remoteControl.addCharacteristic(remoteControlEnabled);
+    remoteControl.addCharacteristic(remoteControlStop);
+    remoteControl.addCharacteristic(remoteControlJoystickX);
+    remoteControl.addCharacteristic(remoteControlJoystickY);
+    BLE.addService(remoteControl);
+    BLE.advertise();
+    Serial.println("Bluetooth device active, waiting for connections...");
+    
+    prefs.begin("enmed-gbg");
+    
+    // First ever init, we don't have a remote control address.
+    if (!prefs.isKey("remote-control") || FORCE_BLE_RESET)
+    {
+      prefs.putString("remote-control", "n/a");
+    }
+
+    isConnected = false;
+
+    BLEDevice central;
+    cenral = BLE.central();
+
+    // loop()
+    for(;;)
+    {
+
+      if (central && !isConnected)
+      {
+        String connected_mac = central.address();
+        String stored_mac = prefs.getString("remote-control");
+        if (stored_mac == "n/a")
+        {
+          prefs.putString("remote-control", connected_mac);
+        }
+        else if (connected_mac == stored_mac)
+        {
+          BLE.stopAdvertise();
+          isConnected = true;
+        }
+        else
+        {
+          BLE.disconnect();
+          central = BLE.central();
+          isConnected = false;
+        }
+      } 
+      else if (central && isConnected && BLE.connected())
+      {
+        printf("[BLE Thread] Is connected to %s\n", central.address());
+
+        remoteX = remoteControlJoystickX.getValue();
+        remoteY = remoteControlJoystickY.getValue();
+        remoteStop = remoteControlStop.getValue();
+        remoteEnable = remoteControlEnabled.getValue();
+        isConnected = true;
+      }
+      else
+      {
+        isConnected = false;
+      }
+      
+      const TickType_t xDelay = 10 / portTICK_PERIOD_MS;
+      vTaskDelay(xDelay);
+    }
+  }
+
+// ========================================================
+//                Motor Control Thread
+// ========================================================
+// Motor Driver shield definiation
+DualVNH5019MotorShield md;
+#define REV_LEFT_DRIVE false       // Change these if the motors are wired backwards.
+#define REV_RIGHT_DRIVE false      // Change these if the motors are wired backwards.
+#define SWAP_MOTORS false          // Change if the left motor and the right motor are swapped.
+
+// This is the max constrained limit for the device. This goes up to 400.
+const int MAX_FWD_LEFT_MOTOR_POWER = 150;
+const int MAX_FWD_RIGHT_MOTOR_POWER = 150;
+const int MAX_BWD_LEFT_MOTOR_POWER = -150;
+const int MAX_BWD_RIGHT_MOTOR_POWER = -150;
 
 // This is the motor power. A power of greater than 0 is forward.
 // A power of less than 0 is backward.
 int leftMotorPower = 0;
 int rightMotorPower = 0;
+
+int motorPrintCounter = 0;
+
+void stopIfFault()
+{
+  if (md.getM1Fault())
+  {
+    Serial.println("M1 fault");
+    while(1);
+  }
+  if (md.getM2Fault())
+  {
+    Serial.println("M2 fault");
+    while(1);
+  }
+}
 
  /*
   * This is the motor control function that is primarily responsible 
@@ -148,107 +278,93 @@ int rightMotorPower = 0;
 void motor_drive_func(void *pvParams) 
 {
   // Setup()
-  const int leftMotorDirPin = MOTOR_A_DIR_PIN;
-  const int leftMotorPWMPin = MOTOR_A_PWM_PIN;
-  const int rightMotorDirPin = MOTOR_B_DIR_PIN;
-  const int rightMotorPWMPin = MOTOR_B_PWM_PIN;
-  
   leftMotorPower = 0;
   rightMotorPower = 0;
 
-  pinMode(MOTOR_A_DIR_PIN, OUTPUT);
-  pinMode(MOTOR_B_DIR_PIN, OUTPUT);
-  pinMode(MOTOR_A_PWM_PIN, OUTPUT);
-  pinMode(MOTOR_B_PWM_PIN, OUTPUT);
-
-  // Set all the motors to the initial value of zero.
-  analogWrite(MOTOR_A_PWM_PIN, 0);
-  analogWrite(MOTOR_B_PWM_PIN, 0);
+  md.init();
 
   int leftMotorAppliedPower = 0;
   int rightMotorAppliedPower = 0;
-  int leftMotorDir = 0;
-  int rightMotorDir = 0;
   // loop()
   for(;;)
   {
 
     // Motor power is constrained to between -100% to 100%
     // This is then mapped to the PWM range necessary for use on the motor driver.
-    leftMotorPower = constrain(leftMotorPower, -100, 100);
-    rightMotorPower = constrain(rightMotorPower, -100, 100);
+    leftMotorPower = constrain(leftMotorPower, -50, 100);
+    rightMotorPower = constrain(rightMotorPower, -50, 100);
+
+    #if REV_LEFT_DRIVE
+      leftMotorPower = leftMotorPower * -1;
+    #endif
+    #if REV_RIGHT_DRIVE
+      rightMotorPower = rightMotorPower * -1;
+    #endif
+
+    #if SWAP_MOTORS
+      leftMotorPower = leftMotorPower ^ rightMotorPower;
+      rightMotorPower = leftMotorPower ^ rightMotorPower;
+      leftMotorPower = leftMotorPower ^ rightMotorPower;
+    #endif
+
     
-    
-    if (leftMotorPower > 0) {
-      leftMotorAppliedPower = constrain(leftMotorPower, 1, MAX_FWD_LEFT_MOTOR_POWER);
-      #if REV_LEFT_DRIVE
-        leftMotorDir = LOW;
-      #else
-        leftMotorDir = HIGH;
-      #endif
-      digitalWrite(leftMotorDirPin, leftMotorDir);
-      analogWrite(leftMotorPWMPin, leftMotorAppliedPower);
-    } else if (leftMotorPower < 0) {
-      leftMotorAppliedPower = constrain(abs(leftMotorPower), 1, MAX_BWD_LEFT_MOTOR_POWER);
-      #if REV_LEFT_DRIVE
-        leftMotorDir = HIGH;
-      #else
-        leftMotorDir = LOW;
-      #endif
-      digitalWrite(leftMotorDirPin, leftMotorDir);
-      analogWrite(leftMotorPWMPin, leftMotorAppliedPower);
+    if (leftMotorPower > 10 || leftMotorPower < 10) {
+      leftMotorAppliedPower = map(leftMotorPower, -100, 100, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
+      leftMotorAppliedPower = constrain(leftMotorAppliedPower, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
+      md.setM1Speed(leftMotorAppliedPower);
+      stopIfFault();
     } else {
-      analogWrite(leftMotorPWMPin, 0);
+      md.setM1Speed(0);
     }
 
-    if (rightMotorPower > 0) {
-      rightMotorAppliedPower = constrain(rightMotorPower, 1, MAX_FWD_RIGHT_MOTOR_POWER);
-      #if REV_LEFT_DRIVE
-        rightMotorDir = LOW;
-      #else
-        rightMotorDir = HIGH;
-      #endif
-      digitalWrite(rightMotorDirPin, rightMotorDir);
-      analogWrite(rightMotorPWMPin, rightMotorAppliedPower);
-    } else if (rightMotorPower < 0) {
-      rightMotorAppliedPower = constrain(abs(rightMotorPower), 1, MAX_BWD_RIGHT_MOTOR_POWER);
-      #if REV_LEFT_DRIVE
-        rightMotorDir = HIGH;
-      #else
-        rightMotorDir = LOW;
-      #endif
-      digitalWrite(rightMotorDirPin, rightMotorDir);
-      analogWrite(rightMotorPWMPin, rightMotorAppliedPower);
+    if (rightMotorPower > 10 || rightMotorPower < 10) {
+      rightMotorAppliedPower = map(rightMotorPower, -100, 100, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
+      rightMotorAppliedPower = constrain(rightMotorAppliedPower, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_RIGHT_MOTOR_POWER);
+      md.setM2Speed(rightMotorAppliedPower);
+      stopIfFault();
     } else {
-      analogWrite(rightMotorPWMPin, 0);
+      md.setM2Speed(0);
     }
-    printf("[Motor Dr Thread] LMP=%4d, RMP=%4d, | LMAP=%5d, RMAP=%5d LM_DIR=%d, RM_DIR=%d \n", leftMotorPower, rightMotorPower, leftMotorAppliedPower, rightMotorAppliedPower, leftMotorDir, rightMotorDir);
 
-    vTaskDelay(configTICK_RATE_HZ);
+    int left_motor_current = md.getM1CurrentMilliamps();
+    int right_motor_current = md.getM2CurrentMilliamps();
+
+    if (motorPrintCounter >=10)
+    {
+      printf("[Motor Dr Thread] LMP=%4d, RMP=%4d, | LMAP=%5d, RMAP=%5d LM_CUR=%4d mA, RM_CUR=%4d mA \n", leftMotorPower, rightMotorPower, leftMotorAppliedPower, rightMotorAppliedPower, left_motor_current, right_motor_current);
+      motorPrintCounter = 0;
+    }
+    motorPrintCounter++;
+    const TickType_t xDelay = 10 / portTICK_PERIOD_MS;
+    vTaskDelay(xDelay);
   }
 
 }
 
+// ========================================================
+//                Joystick Thread
+// ========================================================
 
-
-#define JOYSTICK_X_AXIS_PIN A0
-#define JOYSTICK_Y_AXIS_PIN A1
+#define JOYSTICK_X_AXIS_PIN A2
+#define JOYSTICK_Y_AXIS_PIN A3
 
 #define FLIP_X_AXIS false
 #define FLIP_Y_AXIS false
-#define X_Y_TRANSPOSE false
+#define X_Y_TRANSPOSE true
 
-#define MAX_X_AXIS 1024
-#define MAX_Y_AXIS 1024
+#define MAX_X_AXIS 1023
+#define MAX_Y_AXIS 1023
 
-#define MID_X_AXIS 528
-#define MID_Y_AXIS 1007
+#define MID_X_AXIS 495
+#define MID_Y_AXIS 495
 
 #define MIN_X_AXIS 0
-#define MIN_Y_AXIS 1000
+#define MIN_Y_AXIS 0
 
-#define X_AXIS_DEADZONE 20
-#define Y_AXIS_DEADZONE 20
+#define X_AXIS_DEADZONE 50
+#define Y_AXIS_DEADZONE 50
+
+#define USE_SELF_CAL_JOYSTICK true
 
 void joystick_func(void *pvParams)
 {
@@ -257,6 +373,29 @@ void joystick_func(void *pvParams)
   int yValue = 0;
   int correctedXValue = 0;
   int correctedYValue= 0;
+  int joystickPrintCount = 0;
+  int X_MID = MID_X_AXIS;
+  int Y_MID = MID_Y_AXIS;
+
+  #if USE_SELF_CAL_JOYSTICK
+    // We are going to calibrate the joystick, so lets block.
+    Serial.println("[Joystick Thread] Calibrating Joystick...");
+    for (int i = 0; i < 256; i++)
+    {
+      xValue = analogRead(JOYSTICK_X_AXIS_PIN);
+      yValue = analogRead(JOYSTICK_Y_AXIS_PIN);
+
+      X_MID += xValue;
+      Y_MID += yValue;
+    }
+
+    // Quick and easy division.
+    X_MID = X_MID >> 8;
+    Y_MID = Y_MID >> 8;
+
+
+    printf("[Joystick Thread] X_MID = %4d, Y_MID = %4d", X_MID, Y_MID);
+  #endif
 
   #if FLIP_X_AXIS
     const int xFlip = -1;
@@ -288,19 +427,20 @@ void joystick_func(void *pvParams)
 
     // If the joystick values are close to the deadzones, let them be in the dead zone. 
     // Allows for some buffer.
-    if (xValue - MID_X_AXIS < X_AXIS_DEADZONE && xValue - MID_X_AXIS > -X_AXIS_DEADZONE )
+    if (xValue - X_MID < X_AXIS_DEADZONE && xValue - X_MID > -X_AXIS_DEADZONE )
     {
-        correctedXValue = MID_X_AXIS;
+        correctedXValue = X_MID;
     }
-    if (yValue - MID_Y_AXIS < Y_AXIS_DEADZONE && yValue - MID_Y_AXIS > -Y_AXIS_DEADZONE )
+    if (yValue - Y_MID < Y_AXIS_DEADZONE && yValue - Y_MID > -Y_AXIS_DEADZONE )
     {
-        correctedYValue = MID_Y_AXIS;
+        correctedYValue = Y_MID;
     }
 
     // Now we need to scale the captured values, to values between -100 and 100.
-    scaledX = map(correctedXValue - MID_X_AXIS, MIN_X_AXIS - MID_X_AXIS, MAX_X_AXIS - MID_X_AXIS, -100, 100);
-    scaledY = map(correctedYValue - MID_Y_AXIS, MIN_Y_AXIS - MID_Y_AXIS, MAX_Y_AXIS - MID_Y_AXIS, -100, 100);
+    scaledX = map(correctedXValue - X_MID, MIN_X_AXIS - X_MID, MAX_X_AXIS - X_MID, -100, 100);
+    scaledY = map(correctedYValue - Y_MID, MIN_Y_AXIS - Y_MID, MAX_Y_AXIS - Y_MID, -100, 100);
     
+
     scaledX = scaledX * xFlip;
     scaledY = scaledY * yFlip;
 
@@ -311,7 +451,12 @@ void joystick_func(void *pvParams)
       scaledX = scaledX ^ scaledY;
     #endif
 
-    printf("[Joystick Thread] X=%4d, Y=%4d, Xc=%4d, Yc=%4d, Xs=%4d, Ys=%4d \n", xValue, yValue, correctedXValue, correctedYValue, scaledX, scaledY);
+    if (joystickPrintCount >= 10)
+    {
+      printf("[Joystick Thread] X=%4d, Y=%4d, Xc=%4d, Yc=%4d, Xs=%4d, Ys=%4d \n", xValue, yValue, correctedXValue, correctedYValue, scaledX, scaledY);
+      joystickPrintCount = 0;
+    }
+    joystickPrintCount++;
     
     // Now we have the motor data. We can calculate the arcade drive values.
     maximum = max(abs(scaledY), abs(scaledX));
@@ -349,6 +494,8 @@ void joystick_func(void *pvParams)
         }
     }
 
+    const TickType_t xDelay = 10 / portTICK_PERIOD_MS;
+    vTaskDelay(xDelay);
   }
 }
 
