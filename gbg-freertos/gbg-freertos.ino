@@ -12,7 +12,7 @@
  * GLOBAL VARIABLES
  **************************************************************************************/
 
-TaskHandle_t loop_task, blinky_task, motor_drive_task, joystick_task, ble_server;
+TaskHandle_t loop_task, blinky_task, motor_drive_task, joystick_task, ble_task;
 
 /**************************************************************************************
  * SETUP/LOOP
@@ -88,6 +88,22 @@ void setup()
   
   if (rc_joystick != pdPASS) {
     Serial.println("Failed to create 'joystick' thread");
+    return;
+  }
+
+  auto const ble_server = xTaskCreate
+    (
+      ble_func,
+      static_cast<const char*>("BLE Server Thread"),
+      512/4,
+      nullptr,
+      1,
+      &ble_task
+    );
+
+  if (ble_server != pdPASS)
+  {
+    Serial.println("Failed to create 'ble server' thread");
     return;
   }
 
@@ -189,7 +205,7 @@ void blinky_thread_func(void *pvParameters)
     isConnected = false;
 
     BLEDevice central;
-    cenral = BLE.central();
+    central = BLE.central();
 
     // loop()
     for(;;)
@@ -219,10 +235,10 @@ void blinky_thread_func(void *pvParameters)
       {
         printf("[BLE Thread] Is connected to %s\n", central.address());
 
-        remoteX = remoteControlJoystickX.getValue();
-        remoteY = remoteControlJoystickY.getValue();
-        remoteStop = remoteControlStop.getValue();
-        remoteEnable = remoteControlEnabled.getValue();
+        remoteX = remoteControlJoystickX.value();
+        remoteY = remoteControlJoystickY.value();
+        remoteStop = remoteControlStop.value();
+        remoteEnabled = remoteControlEnabled.value();
         isConnected = true;
       }
       else
