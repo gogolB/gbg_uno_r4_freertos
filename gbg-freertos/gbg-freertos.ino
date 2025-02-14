@@ -23,6 +23,22 @@ void setup()
   Serial.begin(115200);
   while (!Serial) { }
 
+  auto const ble_server = xTaskCreate
+  (
+    ble_func,
+    static_cast<const char*>("BLE Server Thread"),
+    512/4,
+    nullptr,
+    1,
+    &ble_task
+  );
+
+  if (ble_server != pdPASS)
+  {
+    Serial.println("Failed to create 'ble server' thread");
+    return;
+  }
+
     /* Init a task that calls 'loop'
    * since after the call to
    * 'vTaskStartScheduler' we'll never
@@ -88,22 +104,6 @@ void setup()
   
   if (rc_joystick != pdPASS) {
     Serial.println("Failed to create 'joystick' thread");
-    return;
-  }
-
-  auto const ble_server = xTaskCreate
-    (
-      ble_func,
-      static_cast<const char*>("BLE Server Thread"),
-      512/4,
-      nullptr,
-      1,
-      &ble_task
-    );
-
-  if (ble_server != pdPASS)
-  {
-    Serial.println("Failed to create 'ble server' thread");
     return;
   }
 
@@ -218,6 +218,8 @@ void blinky_thread_func(void *pvParameters)
         if (stored_mac == "n/a")
         {
           prefs.putString("remote-control", connected_mac);
+          BLE.stopAdvertise();
+          isConnected = true;
         }
         else if (connected_mac == stored_mac)
         {
@@ -291,6 +293,9 @@ void stopIfFault()
   * This is the motor control function that is primarily responsible 
   * for setting motor values once they are calculated.
   */
+
+#define POWER_INC 10
+
 void motor_drive_func(void *pvParams) 
 {
   // Setup()
@@ -298,6 +303,9 @@ void motor_drive_func(void *pvParams)
   rightMotorPower = 0;
 
   md.init();
+
+  int leftMotorRequestedPower = 0;
+  int rightMotorRequestedPower = 0;
 
   int leftMotorAppliedPower = 0;
   int rightMotorAppliedPower = 0;
@@ -325,8 +333,27 @@ void motor_drive_func(void *pvParams)
 
     
     if (leftMotorPower > 10 || leftMotorPower < 10) {
-      leftMotorAppliedPower = map(leftMotorPower, -100, 100, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
-      leftMotorAppliedPower = constrain(leftMotorAppliedPower, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
+      leftMotorRequestedPower = map(leftMotorPower, -100, 100, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
+      leftMotorRequestedPower = constrain(leftMotorRequestedPower, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
+
+      if (leftMotorRequestedPower > leftMotorAppliedPower + POWER_INC)
+      {
+        leftMotorAppliedPower += POWER_INC;
+      }
+      else
+      {
+        leftMotorAppliedPower = leftMotorRequestedPower;
+      }
+
+      if (leftMotorRequestedPower < leftMotorAppliedPower - POWER_INC)
+      {
+        leftMotorAppliedPower -= POWER_INC;
+      }
+      else
+      {
+        leftMotorAppliedPower = leftMotorRequestedPower;
+      }
+
       md.setM1Speed(leftMotorAppliedPower);
       stopIfFault();
     } else {
@@ -334,8 +361,28 @@ void motor_drive_func(void *pvParams)
     }
 
     if (rightMotorPower > 10 || rightMotorPower < 10) {
-      rightMotorAppliedPower = map(rightMotorPower, -100, 100, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
-      rightMotorAppliedPower = constrain(rightMotorAppliedPower, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_RIGHT_MOTOR_POWER);
+      rightMotorRequestedPower = map(rightMotorPower, -100, 100, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
+      rightMotorRequestedPower = constrain(rightMotorRequestedPower, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_RIGHT_MOTOR_POWER);
+
+
+      if (rightMotorRequestedPower > rightMotorAppliedPower + POWER_INC)
+      {
+        rightMotorAppliedPower += POWER_INC;
+      }
+      else
+      {
+        rightMotorAppliedPower = rightMotorRequestedPower;
+      }
+
+      if (rightMotorRequestedPower < rightMotorAppliedPower - POWER_INC)
+      {
+        rightMotorAppliedPower -= POWER_INC;
+      }
+      else
+      {
+        rightMotorAppliedPower = rightMotorRequestedPower;
+      }
+
       md.setM2Speed(rightMotorAppliedPower);
       stopIfFault();
     } else {
@@ -473,6 +520,17 @@ void joystick_func(void *pvParams)
       joystickPrintCount = 0;
     }
     joystickPrintCount++;
+
+    if(remoteEnabled && isConnected)
+    {
+      scaledY = remoteY;
+      scaledX = remoteX;
+    }
+    if (remoteStop && isConnected)
+    {
+      scaledY = 0;
+      scaledX = 0;
+    }
     
     // Now we have the motor data. We can calculate the arcade drive values.
     maximum = max(abs(scaledY), abs(scaledX));
