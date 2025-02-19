@@ -107,8 +107,8 @@
    // loop()
    for (;;)
    {
-     leftMotorPower = constrain(leftMotorPower, -50, 100);
-     rightMotorPower = constrain(rightMotorPower, -50, 100);
+     leftMotorPower = constrain(leftMotorPower, -100, 100);
+     rightMotorPower = constrain(rightMotorPower, -100, 100);
  
      #if REV_LEFT_DRIVE
        leftMotorPower = leftMotorPower * -1;
@@ -145,17 +145,17 @@
         last_motor_increment_time = millis();
 
         if (leftMotorAppliedPower < leftMotorRequestedPower) {
-          leftMotorAppliedPower += STARTUP_INCREMENT;
+          leftMotorAppliedPower += min(STARTUP_INCREMENT, leftMotorRequestedPower - leftMotorAppliedPower);
         } else if (leftMotorAppliedPower > leftMotorRequestedPower) {
-          leftMotorAppliedPower -= STARTUP_INCREMENT;
+          leftMotorAppliedPower -= min(STARTUP_INCREMENT, leftMotorAppliedPower - leftMotorRequestedPower);
         } else {
           leftMotorAppliedPower = leftMotorRequestedPower;
         }
 
         if (rightMotorAppliedPower < rightMotorRequestedPower) {
-          rightMotorAppliedPower += STARTUP_INCREMENT; 
+          rightMotorAppliedPower += min(STARTUP_INCREMENT, rightMotorRequestedPower - rightMotorAppliedPower); 
         } else if (rightMotorAppliedPower > rightMotorRequestedPower) {
-          rightMotorAppliedPower -= STARTUP_INCREMENT;
+          rightMotorAppliedPower -= min(STARTUP_INCREMENT, rightMotorAppliedPower - rightMotorRequestedPower);
         } else {
           rightMotorAppliedPower = rightMotorRequestedPower; 
         }
