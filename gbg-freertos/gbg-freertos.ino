@@ -56,10 +56,10 @@
  #define SWAP_MOTORS false          // Change if the left motor and the right motor are swapped.
  
  // This is the max constrained limit for the device. This goes up to 400.
- const int MAX_FWD_LEFT_MOTOR_POWER = 100;
- const int MAX_FWD_RIGHT_MOTOR_POWER = 100;
- const int MAX_BWD_LEFT_MOTOR_POWER = -100;
- const int MAX_BWD_RIGHT_MOTOR_POWER = -100;
+ const int MAX_FWD_LEFT_MOTOR_POWER = 250;
+ const int MAX_FWD_RIGHT_MOTOR_POWER = 250;
+ const int MAX_BWD_LEFT_MOTOR_POWER = -250;
+ const int MAX_BWD_RIGHT_MOTOR_POWER = -250;
  
  // This is the motor power. A power of greater than 0 is forward.
  // A power of less than 0 is backward.
