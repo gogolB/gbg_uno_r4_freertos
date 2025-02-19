@@ -87,8 +87,8 @@
    */
  
  #define STARTUP_INCREMENT 5   // Increment power by 5 at a time
- #define MOTOR_LOOP_DELAY_MS 50   // Delay between increments (adjust as needed)
- 
+ #define MOTOR_LOOP_DELAY_MS 10   // Delay between increments (adjust as needed)
+ #define TIME_BTWN_MOTOR_INCREMENT_MS 100 // Time between motor increments
  void motor_drive_func(void *pvParams) 
  {
    // Setup()
@@ -102,6 +102,7 @@
  
    int leftMotorAppliedPower = 0;
    int rightMotorAppliedPower = 0;
+   int last_motor_increment_time = 0;
  
    // loop()
    for (;;)
@@ -129,10 +130,12 @@
        leftMotorRequestedPower = constrain(leftMotorRequestedPower, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
  
        // Gradual acceleration
-       if (leftMotorAppliedPower < leftMotorRequestedPower) {
+       if (leftMotorAppliedPower < leftMotorRequestedPower && millis() - last_motor_increment_time > TIME_BTWN_MOTOR_INCREMENT_MS) {
          leftMotorAppliedPower += min(STARTUP_INCREMENT, leftMotorRequestedPower - leftMotorAppliedPower);
-       } else if (leftMotorAppliedPower > leftMotorRequestedPower) {
+         last_motor_increment_time = millis();
+       } else if (leftMotorAppliedPower > leftMotorRequestedPower && millis() - last_motor_increment_time > TIME_BTWN_MOTOR_INCREMENT_MS) {
          leftMotorAppliedPower -= min(STARTUP_INCREMENT, leftMotorAppliedPower - leftMotorRequestedPower);
+         last_motor_increment_time = millis();
        }
  
        md.setM1Speed(leftMotorAppliedPower);
@@ -146,10 +149,12 @@
        rightMotorRequestedPower = constrain(rightMotorRequestedPower, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_RIGHT_MOTOR_POWER);
  
        // Gradual acceleration
-       if (rightMotorAppliedPower < rightMotorRequestedPower) {
+       if (rightMotorAppliedPower < rightMotorRequestedPower && millis() - last_motor_increment_time > TIME_BTWN_MOTOR_INCREMENT_MS) {
          rightMotorAppliedPower += min(STARTUP_INCREMENT, rightMotorRequestedPower - rightMotorAppliedPower);
-       } else if (rightMotorAppliedPower > rightMotorRequestedPower) {
+         last_motor_increment_time = millis();
+       } else if (rightMotorAppliedPower > rightMotorRequestedPower && millis() - last_motor_increment_time > TIME_BTWN_MOTOR_INCREMENT_MS) {
          rightMotorAppliedPower -= min(STARTUP_INCREMENT, rightMotorAppliedPower - rightMotorRequestedPower);
+         last_motor_increment_time = millis();
        }
  
        md.setM2Speed(rightMotorAppliedPower);
@@ -197,7 +202,7 @@
  
  #define USE_SELF_CAL_JOYSTICK true
 
- #define JOYSTICK_LOOP_DELAY_MS 50
+ #define JOYSTICK_LOOP_DELAY_MS 20
  
  void joystick_func(void *pvParams)
  {
