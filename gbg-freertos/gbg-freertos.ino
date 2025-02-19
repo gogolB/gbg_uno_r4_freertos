@@ -168,7 +168,7 @@
      int right_motor_current = md.getM2CurrentMilliamps();
  
      if (motorPrintCounter >= 10) {
-       printf("[Motor Dr Thread] LRP=%4d, RRP=%4d, | LMAP=%5d, RMAP=%5d LM_CUR=%4d mA, RM_CUR=%4d mA \n", 
+       printf("[Motor Dr Thread] LRP=%5d, RRP=%5d, | LMAP=%5d, RMAP=%5d | LM_CUR=%5d mA, RM_CUR=%5d mA \n", 
                leftMotorRequestedPower, rightMotorRequestedPower, leftMotorAppliedPower, rightMotorAppliedPower, left_motor_current, right_motor_current);
        motorPrintCounter = 0;
      }
