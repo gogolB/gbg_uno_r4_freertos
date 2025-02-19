@@ -56,10 +56,10 @@
  #define SWAP_MOTORS false          // Change if the left motor and the right motor are swapped.
  
  // This is the max constrained limit for the device. This goes up to 400.
- const int MAX_FWD_LEFT_MOTOR_POWER = 250;
- const int MAX_FWD_RIGHT_MOTOR_POWER = 250;
- const int MAX_BWD_LEFT_MOTOR_POWER = -250;
- const int MAX_BWD_RIGHT_MOTOR_POWER = -250;
+ const int MAX_FWD_LEFT_MOTOR_POWER = 100;
+ const int MAX_FWD_RIGHT_MOTOR_POWER = 100;
+ const int MAX_BWD_LEFT_MOTOR_POWER = -100;
+ const int MAX_BWD_RIGHT_MOTOR_POWER = -100;
  
  // This is the motor power. A power of greater than 0 is forward.
  // A power of less than 0 is backward.
@@ -86,7 +86,7 @@
    * for setting motor values once they are calculated.
    */
  
- #define STARTUP_INCREMENT 5   // Increment power by 5 at a time
+ #define MOTOR_POWER_INCREMENT 5   // Increment power by 5 at a time
  #define MOTOR_LOOP_DELAY_MS 10   // Delay between increments (adjust as needed)
  #define TIME_BTWN_MOTOR_INCREMENT_MS 100 // Time between motor increments
  void motor_drive_func(void *pvParams) 
@@ -145,17 +145,17 @@
         last_motor_increment_time = millis();
 
         if (leftMotorAppliedPower < leftMotorRequestedPower) {
-          leftMotorAppliedPower += min(STARTUP_INCREMENT, leftMotorRequestedPower - leftMotorAppliedPower);
+          leftMotorAppliedPower += min(MOTOR_POWER_INCREMENT, leftMotorRequestedPower - leftMotorAppliedPower);
         } else if (leftMotorAppliedPower > leftMotorRequestedPower) {
-          leftMotorAppliedPower -= min(STARTUP_INCREMENT, leftMotorAppliedPower - leftMotorRequestedPower);
+          leftMotorAppliedPower -= min(MOTOR_POWER_INCREMENT, leftMotorAppliedPower - leftMotorRequestedPower);
         } else {
           leftMotorAppliedPower = leftMotorRequestedPower;
         }
 
         if (rightMotorAppliedPower < rightMotorRequestedPower) {
-          rightMotorAppliedPower += min(STARTUP_INCREMENT, rightMotorRequestedPower - rightMotorAppliedPower); 
+          rightMotorAppliedPower += min(MOTOR_POWER_INCREMENT, rightMotorRequestedPower - rightMotorAppliedPower); 
         } else if (rightMotorAppliedPower > rightMotorRequestedPower) {
-          rightMotorAppliedPower -= min(STARTUP_INCREMENT, rightMotorAppliedPower - rightMotorRequestedPower);
+          rightMotorAppliedPower -= min(MOTOR_POWER_INCREMENT, rightMotorAppliedPower - rightMotorRequestedPower);
         } else {
           rightMotorAppliedPower = rightMotorRequestedPower; 
         }
