@@ -160,7 +160,7 @@
           rightMotorAppliedPower = rightMotorRequestedPower; 
         }
         
-        md.setSpeed(leftMotorAppliedPower, rightMotorAppliedPower);
+        md.setSpeeds(leftMotorAppliedPower, rightMotorAppliedPower);
         stopIfFault();
      }
  
