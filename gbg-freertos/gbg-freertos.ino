@@ -12,7 +12,7 @@
   * GLOBAL VARIABLES
   **************************************************************************************/
  
- TaskHandle_t loop_task, blinky_task, motor_drive_task, joystick_task, ble_server;
+ TaskHandle_t loop_task, blinky_task, motor_drive_task, joystick_task;
 
  void loop()
  {
@@ -45,111 +45,6 @@
      vTaskDelay(configTICK_RATE_HZ);
    }
  }
- 
-   // ==================================================
-   //                    BLE Server
-   // ==================================================
- 
- 
- #define FORCE_BLE_RESET false
- 
-   BLEService remoteControl("06f3d410-1f9d-4020-b6c0-ad20d295d869");
-   BLEBoolCharacteristic remoteControlEnabled("cc33b6ac-e38e-45ab-a5f4-d39b77928ec9", BLERead | BLEWrite);
-   BLEBoolCharacteristic remoteControlStop("2f81b369-7d9f-4d5e-92fa-1c00c6651b5d", BLERead | BLEWrite);
-   BLEShortCharacteristic remoteControlJoystickX("a204e8f5-cea7-47e8-89eb-59bcc2ba28d1", BLERead | BLEWrite);
-   BLEShortCharacteristic remoteControlJoystickY("2e55d9fb-094e-4a92-a1ca-fe5055d0c54e", BLERead | BLEWrite);
- 
-   bool isConnected = false;
- 
-   Preferences prefs;
- 
-   int remoteX;
-   int remoteY;
-   bool remoteEnabled;
-   bool remoteStop;
- 
-   void ble_func(void *pvParams)
-   {
-     // Setup()
- 
- 
-     remoteX = 0;
-     remoteY = 0;
-     remoteEnabled = false;
-     remoteStop = false;
- 
-     if (!BLE.begin()) 
-     {
-       Serial.println("Starting BLE failed!");
-       while (1);
-     }
- 
-     BLE.setLocalName("EnMed-GBG-Car-V1.0");
-     BLE.setAdvertisedService(remoteControl);
-     remoteControl.addCharacteristic(remoteControlEnabled);
-     remoteControl.addCharacteristic(remoteControlStop);
-     remoteControl.addCharacteristic(remoteControlJoystickX);
-     remoteControl.addCharacteristic(remoteControlJoystickY);
-     BLE.addService(remoteControl);
-     BLE.advertise();
-     Serial.println("Bluetooth device active, waiting for connections...");
-     
-     prefs.begin("enmed-gbg");
-     
-     // First ever init, we don't have a remote control address.
-     if (!prefs.isKey("remote-control") || FORCE_BLE_RESET)
-     {
-       prefs.putString("remote-control", "n/a");
-     }
- 
-     isConnected = false;
- 
-     BLEDevice central;
-     central = BLE.central();
- 
-     // loop()
-     for(;;)
-     {
- 
-       if (central && !isConnected)
-       {
-         String connected_mac = central.address();
-         String stored_mac = prefs.getString("remote-control");
-         if (stored_mac == "n/a")
-         {
-           prefs.putString("remote-control", connected_mac);
-         }
-         else if (connected_mac == stored_mac)
-         {
-           BLE.stopAdvertise();
-           isConnected = true;
-         }
-         else
-         {
-           BLE.disconnect();
-           central = BLE.central();
-           isConnected = false;
-         }
-       } 
-       else if (central && isConnected && BLE.connected())
-       {
-         printf("[BLE Thread] Is connected to %s\n", central.address().c_str());
- 
-         remoteX = remoteControlJoystickX.value();
-         remoteY = remoteControlJoystickY.value();
-         remoteStop = remoteControlStop.value();
-         remoteEnabled = remoteControlEnabled.value();
-         isConnected = true;
-       }
-       else
-       {
-         isConnected = false;
-       }
-       
-       const TickType_t xDelay = 10 / portTICK_PERIOD_MS;
-       vTaskDelay(xDelay);
-     }
-   }
  
  // ========================================================
  //                Motor Control Thread
@@ -192,7 +87,7 @@
    */
  
  #define STARTUP_INCREMENT 5   // Increment power by 5 at a time
- #define STARTUP_DELAY_MS 50   // Delay between increments (adjust as needed)
+ #define MOTOR_LOOP_DELAY_MS 50   // Delay between increments (adjust as needed)
  
  void motor_drive_func(void *pvParams) 
  {
@@ -273,11 +168,9 @@
      }
      motorPrintCounter++;
  
-     vTaskDelay(STARTUP_DELAY_MS / portTICK_PERIOD_MS);
+     vTaskDelay(MOTOR_LOOP_DELAY_MS / portTICK_PERIOD_MS);
    }
  }
- 
- 
   
  // ========================================================
  //                Joystick Thread
@@ -303,6 +196,8 @@
  #define Y_AXIS_DEADZONE 50
  
  #define USE_SELF_CAL_JOYSTICK true
+
+ #define JOYSTICK_LOOP_DELAY_MS 50
  
  void joystick_func(void *pvParams)
  {
@@ -434,8 +329,7 @@
          }
      }
  
-     const TickType_t xDelay = 10 / portTICK_PERIOD_MS;
-     vTaskDelay(xDelay);
+     vTaskDelay(JOYSTICK_LOOP_DELAY_MS / portTICK_PERIOD_MS);
    }
  }
  
