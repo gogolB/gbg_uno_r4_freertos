@@ -128,39 +128,40 @@
      if (abs(leftMotorPower) > 10) {
        leftMotorRequestedPower = map(leftMotorPower, -100, 100, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
        leftMotorRequestedPower = constrain(leftMotorRequestedPower, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
- 
-       // Gradual acceleration
-       if (leftMotorAppliedPower < leftMotorRequestedPower && millis() - last_motor_increment_time > TIME_BTWN_MOTOR_INCREMENT_MS) {
-         leftMotorAppliedPower += min(STARTUP_INCREMENT, leftMotorRequestedPower - leftMotorAppliedPower);
-         last_motor_increment_time = millis();
-       } else if (leftMotorAppliedPower > leftMotorRequestedPower && millis() - last_motor_increment_time > TIME_BTWN_MOTOR_INCREMENT_MS) {
-         leftMotorAppliedPower -= min(STARTUP_INCREMENT, leftMotorAppliedPower - leftMotorRequestedPower);
-         last_motor_increment_time = millis();
-       }
- 
-       md.setM1Speed(leftMotorAppliedPower);
-       stopIfFault();
      } else {
-       md.setM1Speed(0);
+       leftMotorRequestedPower = 0;
      }
  
      if (abs(rightMotorPower) > 10) {
        rightMotorRequestedPower = map(rightMotorPower, -100, 100, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
        rightMotorRequestedPower = constrain(rightMotorRequestedPower, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_RIGHT_MOTOR_POWER);
- 
-       // Gradual acceleration
-       if (rightMotorAppliedPower < rightMotorRequestedPower && millis() - last_motor_increment_time > TIME_BTWN_MOTOR_INCREMENT_MS) {
-         rightMotorAppliedPower += min(STARTUP_INCREMENT, rightMotorRequestedPower - rightMotorAppliedPower);
-         last_motor_increment_time = millis();
-       } else if (rightMotorAppliedPower > rightMotorRequestedPower && millis() - last_motor_increment_time > TIME_BTWN_MOTOR_INCREMENT_MS) {
-         rightMotorAppliedPower -= min(STARTUP_INCREMENT, rightMotorAppliedPower - rightMotorRequestedPower);
-         last_motor_increment_time = millis();
-       }
- 
-       md.setM2Speed(rightMotorAppliedPower);
-       stopIfFault();
      } else {
-       md.setM2Speed(0);
+       rightMotorRequestedPower = 0;
+     }
+
+
+     // Handle the acceleration and deceleration of the motors.
+     if (millis() - last_motor_increment_time > TIME_BTWN_MOTOR_INCREMENT_MS) {
+        last_motor_increment_time = millis();
+
+        if (leftMotorAppliedPower < leftMotorRequestedPower) {
+          leftMotorAppliedPower += STARTUP_INCREMENT;
+        } else if (leftMotorAppliedPower > leftMotorRequestedPower) {
+          leftMotorAppliedPower -= STARTUP_INCREMENT;
+        } else {
+          leftMotorAppliedPower = leftMotorRequestedPower;
+        }
+
+        if (rightMotorAppliedPower < rightMotorRequestedPower) {
+          rightMotorAppliedPower += STARTUP_INCREMENT; 
+        } else if (rightMotorAppliedPower > rightMotorRequestedPower) {
+          rightMotorAppliedPower -= STARTUP_INCREMENT;
+        } else {
+          rightMotorAppliedPower = rightMotorRequestedPower; 
+        }
+        
+        md.setSpeed(leftMotorAppliedPower, rightMotorAppliedPower);
+        stopIfFault();
      }
  
      int left_motor_current = md.getM1CurrentMilliamps();
