@@ -8,9 +8,9 @@
  #include <ArduinoBLE.h>
  #include <Preferences.h>
  
- /**************************************************************************************
-  * GLOBAL VARIABLES
-  **************************************************************************************/
+/**************************************************************************************
+* GLOBAL VARIABLES
+**************************************************************************************/
  
  TaskHandle_t loop_task, blinky_task, motor_drive_task, joystick_task;
 
@@ -294,7 +294,7 @@
  
      if (joystickPrintCount >= 10)
      {
-       printf("[Joystick Thread] X=%4d, Y=%4d, Xc=%4d, Yc=%4d, Xs=%4d, Ys=%4d \n", xValue, yValue, correctedXValue, correctedYValue, scaledX, scaledY);
+       //printf("[Joystick Thread] X=%4d, Y=%4d, Xc=%4d, Yc=%4d, Xs=%4d, Ys=%4d \n", xValue, yValue, correctedXValue, correctedYValue, scaledX, scaledY);
        joystickPrintCount = 0;
      }
      joystickPrintCount++;
