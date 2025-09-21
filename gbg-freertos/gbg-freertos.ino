@@ -494,7 +494,9 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
       //printf("[Joystick Thread] X=%4d, Y=%4d, Xc=%4d, Yc=%4d, Xs=%4d, Ys=%4d \n", xValue, yValue, correctedXValue, correctedYValue, scaledX, scaledY);
       joystickPrintCount = 0;
     }
-    joystickPrintCount++;
+    if (!usingBluetoothInput) {
+      joystickPrintCount++;
+    }
     
     } // End of !usingBluetoothInput block
 
@@ -641,7 +643,7 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
            xSemaphoreGive(bluetoothInputMutex);
          }
          
-         Serial.printf("[Bluetooth Thread] Joystick data: X=%d, Y=%d\n", x, y);
+         printf("[Bluetooth Thread] Joystick data: X=%d, Y=%d\n", x, y);
        }
        
        // Check for stop command
