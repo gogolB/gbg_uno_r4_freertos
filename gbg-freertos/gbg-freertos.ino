@@ -43,6 +43,13 @@ struct RobotConfig {
   int yAxisDeadzone;
   bool useSelfCalJoystick;
   int joystickLoopDelayMs;
+  
+  // Bluetooth settings
+  bool bluetoothEnabled;
+  char pairedDeviceName[32];
+  char pairedDeviceAddress[18];
+  bool bluetoothOverrideLocal;
+  int bluetoothTimeoutMs;
 };
 
 // Global configuration instance
@@ -79,6 +86,13 @@ void initDefaultConfig() {
   config.yAxisDeadzone = 50;
   config.useSelfCalJoystick = true;
   config.joystickLoopDelayMs = 20;
+  
+  // Bluetooth settings defaults
+  config.bluetoothEnabled = true;
+  strcpy(config.pairedDeviceName, "");
+  strcpy(config.pairedDeviceAddress, "");
+  config.bluetoothOverrideLocal = true;
+  config.bluetoothTimeoutMs = 5000;
 }
 
 // Load configuration from preferences
@@ -111,6 +125,13 @@ void loadConfig() {
   config.yAxisDeadzone = preferences.getInt("yDeadzone", config.yAxisDeadzone);
   config.useSelfCalJoystick = preferences.getBool("useSelfCal", config.useSelfCalJoystick);
   config.joystickLoopDelayMs = preferences.getInt("joyLoopDelay", config.joystickLoopDelayMs);
+  
+  // Load Bluetooth settings
+  config.bluetoothEnabled = preferences.getBool("btEnabled", config.bluetoothEnabled);
+  preferences.getString("btDeviceName", config.pairedDeviceName, sizeof(config.pairedDeviceName));
+  preferences.getString("btDeviceAddr", config.pairedDeviceAddress, sizeof(config.pairedDeviceAddress));
+  config.bluetoothOverrideLocal = preferences.getBool("btOverride", config.bluetoothOverrideLocal);
+  config.bluetoothTimeoutMs = preferences.getInt("btTimeout", config.bluetoothTimeoutMs);
   
   preferences.end();
 }
@@ -146,10 +167,34 @@ void saveConfig() {
   preferences.putBool("useSelfCal", config.useSelfCalJoystick);
   preferences.putInt("joyLoopDelay", config.joystickLoopDelayMs);
   
+  // Save Bluetooth settings
+  preferences.putBool("btEnabled", config.bluetoothEnabled);
+  preferences.putString("btDeviceName", config.pairedDeviceName);
+  preferences.putString("btDeviceAddr", config.pairedDeviceAddress);
+  preferences.putBool("btOverride", config.bluetoothOverrideLocal);
+  preferences.putInt("btTimeout", config.bluetoothTimeoutMs);
+  
   preferences.end();
 }
 
- TaskHandle_t loop_task, blinky_task, motor_drive_task, joystick_task, menu_task;
+ TaskHandle_t loop_task, blinky_task, motor_drive_task, joystick_task, menu_task, bluetooth_task;
+
+// Bluetooth globals
+BLEService robotControlService("12345678-1234-1234-1234-123456789abc");
+BLECharacteristic joystickCharacteristic("12345678-1234-1234-1234-123456789abd", BLERead | BLEWrite | BLENotify, 8);
+BLECharacteristic stopCharacteristic("12345678-1234-1234-1234-123456789abe", BLERead | BLEWrite | BLENotify, 1);
+
+// Bluetooth input state
+struct BluetoothInput {
+  bool active;
+  int xValue;
+  int yValue;
+  bool stopCommand;
+  unsigned long lastUpdateTime;
+};
+
+BluetoothInput bluetoothInput = {false, 0, 0, false, 0};
+SemaphoreHandle_t bluetoothInputMutex = nullptr;
 
  void loop()
  {
@@ -378,11 +423,44 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
  
    for(;;)
    {
-     // read analog X and Y analog values
-     xValue = analogRead(config.joystickXPin);
-     yValue = analogRead(config.joystickYPin);
- 
-     correctedXValue = xValue;
+     // Check for Bluetooth input first (if enabled and should override)
+     bool usingBluetoothInput = false;
+     bool bluetoothStopCommand = false;
+     
+     if (config.bluetoothEnabled && config.bluetoothOverrideLocal) {
+       if (xSemaphoreTake(bluetoothInputMutex, portMAX_DELAY) == pdTRUE) {
+         if (bluetoothInput.active) {
+           // Use Bluetooth input instead of local joystick
+           scaledX = bluetoothInput.xValue;
+           scaledY = bluetoothInput.yValue;
+           usingBluetoothInput = true;
+         }
+         if (bluetoothInput.stopCommand) {
+           bluetoothStopCommand = true;
+           bluetoothInput.stopCommand = false; // Clear the flag
+         }
+         xSemaphoreGive(bluetoothInputMutex);
+       }
+     }
+     
+     // Handle stop command immediately
+     if (bluetoothStopCommand) {
+       if (xSemaphoreTake(motorPowerMutex, portMAX_DELAY) == pdTRUE) {
+         leftMotorPower = 0;
+         rightMotorPower = 0;
+         xSemaphoreGive(motorPowerMutex);
+       }
+       Serial.println("[Joystick Thread] Emergency stop executed!");
+       vTaskDelay(config.joystickLoopDelayMs / portTICK_PERIOD_MS);
+       continue;
+     }
+     
+     if (!usingBluetoothInput) {
+       // read analog X and Y analog values
+       xValue = analogRead(config.joystickXPin);
+       yValue = analogRead(config.joystickYPin);
+
+       correctedXValue = xValue;
      correctedYValue = yValue;
  
      // If the joystick values are close to the deadzones, let them be in the dead zone. 
@@ -410,13 +488,17 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
        scaledY = scaledX ^ scaledY;
        scaledX = scaledX ^ scaledY;
      }
- 
-    if (joystickPrintCount >= 10)
+
+    if (joystickPrintCount >= 10 && !usingBluetoothInput)
     {
       //printf("[Joystick Thread] X=%4d, Y=%4d, Xc=%4d, Yc=%4d, Xs=%4d, Ys=%4d \n", xValue, yValue, correctedXValue, correctedYValue, scaledX, scaledY);
       joystickPrintCount = 0;
     }
-    joystickPrintCount++;
+    if (!usingBluetoothInput) {
+      joystickPrintCount++;
+    }
+    
+    } // End of !usingBluetoothInput block
 
     // Now we have the motor data. We can calculate the arcade drive values.
     maximum = max(abs(scaledY), abs(scaledX));
@@ -469,6 +551,142 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
  }
  
  // ========================================================
+ //                Bluetooth Thread
+ // ========================================================
+ 
+ void bluetooth_func(void *pvParams) {
+   // Setup
+   Serial.println("[Bluetooth Thread] Initializing Bluetooth...");
+   
+   if (!BLE.begin()) {
+     Serial.println("[Bluetooth Thread] Failed to initialize BLE!");
+     vTaskDelete(nullptr);
+     return;
+   }
+   
+   // Set local name and advertised service
+   BLE.setLocalName("GBG Robot");
+   BLE.setAdvertisedService(robotControlService);
+   
+   // Add characteristics to service
+   robotControlService.addCharacteristic(joystickCharacteristic);
+   robotControlService.addCharacteristic(stopCharacteristic);
+   
+   // Add service
+   BLE.addService(robotControlService);
+   
+   // Set initial characteristic values
+   uint8_t joystickData[8] = {0, 0, 0, 0, 0, 0, 0, 0}; // x low, x high, y low, y high + padding
+   joystickCharacteristic.writeValue(joystickData, 8);
+   
+   uint8_t stopData = 0;
+   stopCharacteristic.writeValue(stopData);
+   
+   // Start advertising
+   BLE.advertise();
+   Serial.println("[Bluetooth Thread] Bluetooth ready and advertising...");
+   
+   unsigned long lastConnectionCheck = 0;
+   bool wasConnected = false;
+   
+   for (;;) {
+     BLE.poll();
+     
+     // Check connection status
+     bool isConnected = BLE.connected();
+     
+     if (isConnected && !wasConnected) {
+       Serial.println("[Bluetooth Thread] Device connected!");
+       
+       // Save connected device info if not already saved
+       BLEDevice central = BLE.central();
+       if (central && strlen(config.pairedDeviceAddress) == 0) {
+         String address = central.address();
+         address.toCharArray(config.pairedDeviceAddress, sizeof(config.pairedDeviceAddress));
+         String localName = central.localName();
+         if (localName.length() > 0) {
+           localName.toCharArray(config.pairedDeviceName, sizeof(config.pairedDeviceName));
+         } else {
+           strcpy(config.pairedDeviceName, "Unknown Device");
+         }
+         saveConfig();
+         Serial.println("[Bluetooth Thread] Device paired and saved: " + String(config.pairedDeviceName));
+       }
+     } else if (!isConnected && wasConnected) {
+       Serial.println("[Bluetooth Thread] Device disconnected!");
+       
+       // Clear Bluetooth input when disconnected
+       if (xSemaphoreTake(bluetoothInputMutex, portMAX_DELAY) == pdTRUE) {
+         bluetoothInput.active = false;
+         bluetoothInput.stopCommand = false;
+         xSemaphoreGive(bluetoothInputMutex);
+       }
+     }
+     
+     wasConnected = isConnected;
+     
+     if (isConnected) {
+       // Check for joystick data
+       if (joystickCharacteristic.written()) {
+         uint8_t data[8];
+         joystickCharacteristic.readValue(data, 8);
+         
+         // Parse joystick data (x and y as 16-bit signed integers)
+         int16_t x = (data[1] << 8) | data[0];
+         int16_t y = (data[3] << 8) | data[2];
+         
+         if (xSemaphoreTake(bluetoothInputMutex, portMAX_DELAY) == pdTRUE) {
+           bluetoothInput.active = true;
+           bluetoothInput.xValue = x;
+           bluetoothInput.yValue = y;
+           bluetoothInput.lastUpdateTime = millis();
+           xSemaphoreGive(bluetoothInputMutex);
+         }
+         
+         printf("[Bluetooth Thread] Joystick data: X=%d, Y=%d\n", x, y);
+       }
+       
+       // Check for stop command
+       if (stopCharacteristic.written()) {
+         uint8_t stopValue = 0;
+         stopCharacteristic.readValue(stopValue);
+         
+         if (stopValue != 0) {
+           if (xSemaphoreTake(bluetoothInputMutex, portMAX_DELAY) == pdTRUE) {
+             bluetoothInput.stopCommand = true;
+             bluetoothInput.lastUpdateTime = millis();
+             xSemaphoreGive(bluetoothInputMutex);
+           }
+           
+           Serial.println("[Bluetooth Thread] Stop command received!");
+         }
+       }
+       
+       // Check for Bluetooth timeout
+       if (xSemaphoreTake(bluetoothInputMutex, portMAX_DELAY) == pdTRUE) {
+         if (bluetoothInput.active && (millis() - bluetoothInput.lastUpdateTime > config.bluetoothTimeoutMs)) {
+           bluetoothInput.active = false;
+           Serial.println("[Bluetooth Thread] Bluetooth input timeout");
+         }
+         xSemaphoreGive(bluetoothInputMutex);
+       }
+     }
+     
+     // Try to reconnect to known device if not connected and we have a saved address
+     if (!isConnected && strlen(config.pairedDeviceAddress) > 0) {
+       if (millis() - lastConnectionCheck > 10000) { // Check every 10 seconds
+         lastConnectionCheck = millis();
+         Serial.println("[Bluetooth Thread] Attempting to reconnect to known device...");
+         // Note: ArduinoBLE doesn't support direct connection by address in peripheral mode
+         // The device will need to reconnect to us
+       }
+     }
+     
+     vTaskDelay(50 / portTICK_PERIOD_MS);
+   }
+ }
+ 
+ // ========================================================
  //                Serial Menu Task
  // ========================================================
  
@@ -477,8 +695,9 @@ void printMainMenu() {
   Serial.println("1. View Current Settings");
   Serial.println("2. Motor Settings");
   Serial.println("3. Joystick Settings");
-  Serial.println("4. Save Settings to Flash");
-  Serial.println("5. Reset to Defaults");
+  Serial.println("4. Bluetooth Settings");
+  Serial.println("5. Save Settings to Flash");
+  Serial.println("6. Reset to Defaults");
   Serial.println("0. Exit Menu");
   Serial.print("Enter choice: ");
 }
@@ -518,6 +737,18 @@ void printJoystickMenu() {
   Serial.print("Enter choice: ");
 }
 
+void printBluetoothMenu() {
+  Serial.println("\n---- Bluetooth Settings ----");
+  Serial.println("1. Enable/Disable Bluetooth");
+  Serial.println("2. Bluetooth Override Local Input");
+  Serial.println("3. Bluetooth Timeout (ms)");
+  Serial.println("4. Enter Pairing Mode");
+  Serial.println("5. Clear Paired Device");
+  Serial.println("6. View Paired Device Info");
+  Serial.println("0. Back to Main Menu");
+  Serial.print("Enter choice: ");
+}
+
 void printCurrentSettings() {
   Serial.println("\n==== Current Settings ====");
   Serial.println("--- Motor Settings ---");
@@ -546,6 +777,13 @@ void printCurrentSettings() {
   Serial.println("Y Deadzone: " + String(config.yAxisDeadzone));
   Serial.println("Use Self Calibration: " + String(config.useSelfCalJoystick ? "Yes" : "No"));
   Serial.println("Joystick Loop Delay: " + String(config.joystickLoopDelayMs) + " ms");
+  
+  Serial.println("--- Bluetooth Settings ---");
+  Serial.println("Bluetooth Enabled: " + String(config.bluetoothEnabled ? "Yes" : "No"));
+  Serial.println("Override Local Input: " + String(config.bluetoothOverrideLocal ? "Yes" : "No"));
+  Serial.println("Bluetooth Timeout: " + String(config.bluetoothTimeoutMs) + " ms");
+  Serial.println("Paired Device Name: " + String(strlen(config.pairedDeviceName) > 0 ? config.pairedDeviceName : "None"));
+  Serial.println("Paired Device Address: " + String(strlen(config.pairedDeviceAddress) > 0 ? config.pairedDeviceAddress : "None"));
 }
 
 int readIntegerInput(int minVal, int maxVal) {
@@ -751,6 +989,82 @@ void handleJoystickSettings() {
   } while (choice != 0);
 }
 
+void handleBluetoothSettings() {
+  int choice;
+  do {
+    printBluetoothMenu();
+    choice = readIntegerInput(0, 6);
+    Serial.println(choice);
+    
+    switch (choice) {
+      case 1:
+        Serial.println("Current: " + String(config.bluetoothEnabled ? "Enabled" : "Disabled"));
+        Serial.print("Enable Bluetooth (y/n): ");
+        config.bluetoothEnabled = readBoolInput();
+        Serial.println("Set to: " + String(config.bluetoothEnabled ? "Enabled" : "Disabled"));
+        break;
+      case 2:
+        Serial.println("Current: " + String(config.bluetoothOverrideLocal ? "Yes" : "No"));
+        Serial.print("Bluetooth Override Local Input (y/n): ");
+        config.bluetoothOverrideLocal = readBoolInput();
+        Serial.println("Set to: " + String(config.bluetoothOverrideLocal ? "Yes" : "No"));
+        break;
+      case 3:
+        Serial.println("Current: " + String(config.bluetoothTimeoutMs));
+        Serial.print("Enter new Bluetooth Timeout (1000-30000 ms): ");
+        config.bluetoothTimeoutMs = readIntegerInput(1000, 30000);
+        Serial.println("Set to: " + String(config.bluetoothTimeoutMs));
+        break;
+      case 4:
+        Serial.println("Entering pairing mode...");
+        Serial.println("The robot is now discoverable as 'GBG Robot'");
+        Serial.println("Use your Bluetooth device to connect.");
+        Serial.println("Device will be automatically paired on first connection.");
+        Serial.println("Press any key to exit pairing mode...");
+        
+        // Clear any existing pairing to allow new device
+        strcpy(config.pairedDeviceName, "");
+        strcpy(config.pairedDeviceAddress, "");
+        saveConfig();
+        
+        // Wait for user input to exit pairing mode
+        while (!Serial.available()) {
+          vTaskDelay(100 / portTICK_PERIOD_MS);
+        }
+        while (Serial.available()) {
+          Serial.read(); // Clear buffer
+        }
+        Serial.println("Exited pairing mode.");
+        break;
+      case 5:
+        Serial.println("Current paired device: " + String(strlen(config.pairedDeviceName) > 0 ? config.pairedDeviceName : "None"));
+        Serial.print("Clear paired device (y/n): ");
+        if (readBoolInput()) {
+          strcpy(config.pairedDeviceName, "");
+          strcpy(config.pairedDeviceAddress, "");
+          Serial.println("Paired device cleared.");
+        } else {
+          Serial.println("Paired device not cleared.");
+        }
+        break;
+      case 6:
+        Serial.println("=== Paired Device Info ===");
+        if (strlen(config.pairedDeviceName) > 0) {
+          Serial.println("Device Name: " + String(config.pairedDeviceName));
+          Serial.println("Device Address: " + String(config.pairedDeviceAddress));
+        } else {
+          Serial.println("No device paired.");
+        }
+        break;
+      case 0:
+        break;
+      default:
+        Serial.println("Invalid choice!");
+        break;
+    }
+  } while (choice != 0);
+}
+
 void menu_task_func(void *pvParams) {
   // Setup
   Serial.println("\n[Menu Task] Serial menu system initialized.");
@@ -770,7 +1084,7 @@ void menu_task_func(void *pvParams) {
         int choice;
         do {
           printMainMenu();
-          choice = readIntegerInput(0, 5);
+          choice = readIntegerInput(0, 6);
           Serial.println(choice);
           
           switch (choice) {
@@ -784,10 +1098,13 @@ void menu_task_func(void *pvParams) {
               handleJoystickSettings();
               break;
             case 4:
+              handleBluetoothSettings();
+              break;
+            case 5:
               saveConfig();
               Serial.println("Settings saved to flash memory!");
               break;
-            case 5:
+            case 6:
               initDefaultConfig();
               Serial.println("Settings reset to defaults!");
               break;
@@ -867,6 +1184,13 @@ void menu_task_func(void *pvParams) {
       return;
     }
 
+    bluetoothInputMutex = xSemaphoreCreateMutex();
+    if (bluetoothInputMutex == nullptr)
+    {
+      Serial.println("Failed to create bluetooth input mutex");
+      return;
+    }
+
     auto const rc_motor_drive = xTaskCreate
       (
         motor_drive_func,
@@ -895,6 +1219,24 @@ void menu_task_func(void *pvParams) {
     if (rc_joystick != pdPASS) {
       Serial.println("Failed to create 'joystick' thread");
       return;
+    }
+
+    // Create Bluetooth task only if enabled
+    if (config.bluetoothEnabled) {
+      auto const rc_bluetooth = xTaskCreate
+        (
+          bluetooth_func,
+          static_cast<const char*>("Bluetooth Thread"),
+          1024/4,
+          nullptr,
+          1,
+          &bluetooth_task
+        );
+      
+      if (rc_bluetooth != pdPASS) {
+        Serial.println("Failed to create 'bluetooth' thread");
+        return;
+      }
     }
 
     auto const rc_menu = xTaskCreate
