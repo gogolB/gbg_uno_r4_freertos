@@ -12,8 +12,144 @@
 /**************************************************************************************
 * GLOBAL VARIABLES
 **************************************************************************************/
- 
- TaskHandle_t loop_task, blinky_task, motor_drive_task, joystick_task;
+
+// Configuration structure for all configurable parameters
+struct RobotConfig {
+  // Motor settings
+  int maxFwdLeftMotorPower;
+  int maxFwdRightMotorPower;
+  int maxBwdLeftMotorPower;
+  int maxBwdRightMotorPower;
+  bool revLeftDrive;
+  bool revRightDrive;
+  bool swapMotors;
+  int motorPowerIncrement;
+  int motorLoopDelayMs;
+  int timeBtwnMotorIncrementMs;
+  
+  // Joystick settings
+  int joystickXPin;
+  int joystickYPin;
+  bool flipXAxis;
+  bool flipYAxis;
+  bool xyTranspose;
+  int maxXAxis;
+  int maxYAxis;
+  int midXAxis;
+  int midYAxis;
+  int minXAxis;
+  int minYAxis;
+  int xAxisDeadzone;
+  int yAxisDeadzone;
+  bool useSelfCalJoystick;
+  int joystickLoopDelayMs;
+};
+
+// Global configuration instance
+RobotConfig config;
+Preferences preferences;
+
+// Initialize default configuration values
+void initDefaultConfig() {
+  // Motor settings defaults
+  config.maxFwdLeftMotorPower = 100;
+  config.maxFwdRightMotorPower = 100;
+  config.maxBwdLeftMotorPower = -100;
+  config.maxBwdRightMotorPower = -100;
+  config.revLeftDrive = false;
+  config.revRightDrive = false;
+  config.swapMotors = false;
+  config.motorPowerIncrement = 5;
+  config.motorLoopDelayMs = 10;
+  config.timeBtwnMotorIncrementMs = 100;
+  
+  // Joystick settings defaults
+  config.joystickXPin = A2;
+  config.joystickYPin = A3;
+  config.flipXAxis = false;
+  config.flipYAxis = false;
+  config.xyTranspose = true;
+  config.maxXAxis = 1023;
+  config.maxYAxis = 1023;
+  config.midXAxis = 495;
+  config.midYAxis = 495;
+  config.minXAxis = 0;
+  config.minYAxis = 0;
+  config.xAxisDeadzone = 50;
+  config.yAxisDeadzone = 50;
+  config.useSelfCalJoystick = true;
+  config.joystickLoopDelayMs = 20;
+}
+
+// Load configuration from preferences
+void loadConfig() {
+  preferences.begin("robot_config", false);
+  
+  // Load motor settings
+  config.maxFwdLeftMotorPower = preferences.getInt("maxFwdLeftPwr", config.maxFwdLeftMotorPower);
+  config.maxFwdRightMotorPower = preferences.getInt("maxFwdRightPwr", config.maxFwdRightMotorPower);
+  config.maxBwdLeftMotorPower = preferences.getInt("maxBwdLeftPwr", config.maxBwdLeftMotorPower);
+  config.maxBwdRightMotorPower = preferences.getInt("maxBwdRightPwr", config.maxBwdRightMotorPower);
+  config.revLeftDrive = preferences.getBool("revLeftDrive", config.revLeftDrive);
+  config.revRightDrive = preferences.getBool("revRightDrive", config.revRightDrive);
+  config.swapMotors = preferences.getBool("swapMotors", config.swapMotors);
+  config.motorPowerIncrement = preferences.getInt("motorPwrInc", config.motorPowerIncrement);
+  config.motorLoopDelayMs = preferences.getInt("motorLoopDelay", config.motorLoopDelayMs);
+  config.timeBtwnMotorIncrementMs = preferences.getInt("motorIncTime", config.timeBtwnMotorIncrementMs);
+  
+  // Load joystick settings  
+  config.flipXAxis = preferences.getBool("flipXAxis", config.flipXAxis);
+  config.flipYAxis = preferences.getBool("flipYAxis", config.flipYAxis);
+  config.xyTranspose = preferences.getBool("xyTranspose", config.xyTranspose);
+  config.maxXAxis = preferences.getInt("maxXAxis", config.maxXAxis);
+  config.maxYAxis = preferences.getInt("maxYAxis", config.maxYAxis);
+  config.midXAxis = preferences.getInt("midXAxis", config.midXAxis);
+  config.midYAxis = preferences.getInt("midYAxis", config.midYAxis);
+  config.minXAxis = preferences.getInt("minXAxis", config.minXAxis);
+  config.minYAxis = preferences.getInt("minYAxis", config.minYAxis);
+  config.xAxisDeadzone = preferences.getInt("xDeadzone", config.xAxisDeadzone);
+  config.yAxisDeadzone = preferences.getInt("yDeadzone", config.yAxisDeadzone);
+  config.useSelfCalJoystick = preferences.getBool("useSelfCal", config.useSelfCalJoystick);
+  config.joystickLoopDelayMs = preferences.getInt("joyLoopDelay", config.joystickLoopDelayMs);
+  
+  preferences.end();
+}
+
+// Save configuration to preferences
+void saveConfig() {
+  preferences.begin("robot_config", false);
+  
+  // Save motor settings
+  preferences.putInt("maxFwdLeftPwr", config.maxFwdLeftMotorPower);
+  preferences.putInt("maxFwdRightPwr", config.maxFwdRightMotorPower);
+  preferences.putInt("maxBwdLeftPwr", config.maxBwdLeftMotorPower);
+  preferences.putInt("maxBwdRightPwr", config.maxBwdRightMotorPower);
+  preferences.putBool("revLeftDrive", config.revLeftDrive);
+  preferences.putBool("revRightDrive", config.revRightDrive);
+  preferences.putBool("swapMotors", config.swapMotors);
+  preferences.putInt("motorPwrInc", config.motorPowerIncrement);
+  preferences.putInt("motorLoopDelay", config.motorLoopDelayMs);
+  preferences.putInt("motorIncTime", config.timeBtwnMotorIncrementMs);
+  
+  // Save joystick settings
+  preferences.putBool("flipXAxis", config.flipXAxis);
+  preferences.putBool("flipYAxis", config.flipYAxis);
+  preferences.putBool("xyTranspose", config.xyTranspose);
+  preferences.putInt("maxXAxis", config.maxXAxis);
+  preferences.putInt("maxYAxis", config.maxYAxis);
+  preferences.putInt("midXAxis", config.midXAxis);
+  preferences.putInt("midYAxis", config.midYAxis);
+  preferences.putInt("minXAxis", config.minXAxis);
+  preferences.putInt("minYAxis", config.minYAxis);
+  preferences.putInt("xDeadzone", config.xAxisDeadzone);
+  preferences.putInt("yDeadzone", config.yAxisDeadzone);
+  preferences.putBool("useSelfCal", config.useSelfCalJoystick);
+  preferences.putInt("joyLoopDelay", config.joystickLoopDelayMs);
+  
+  preferences.end();
+}
+
+ TaskHandle_t loop_task, blinky_task, motor_drive_task, joystick_task, menu_task;
 
  void loop()
  {
@@ -52,15 +188,6 @@
  // ========================================================
  // Motor Driver shield definiation
  DualVNH5019MotorShield md;
- #define REV_LEFT_DRIVE false       // Change these if the motors are wired backwards.
- #define REV_RIGHT_DRIVE false      // Change these if the motors are wired backwards.
- #define SWAP_MOTORS false          // Change if the left motor and the right motor are swapped.
- 
- // This is the max constrained limit for the device. This goes up to 400.
- const int MAX_FWD_LEFT_MOTOR_POWER = 100;
- const int MAX_FWD_RIGHT_MOTOR_POWER = 100;
- const int MAX_BWD_LEFT_MOTOR_POWER = -100;
- const int MAX_BWD_RIGHT_MOTOR_POWER = -100;
  
  // This is the motor power. A power of greater than 0 is forward.
  // A power of less than 0 is backward.
@@ -88,10 +215,7 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
    * for setting motor values once they are calculated.
    */
  
- #define MOTOR_POWER_INCREMENT 5   // Increment power by 5 at a time
- #define MOTOR_LOOP_DELAY_MS 10   // Delay between increments (adjust as needed)
- #define TIME_BTWN_MOTOR_INCREMENT_MS 100 // Time between motor increments
- void motor_drive_func(void *pvParams) 
+  void motor_drive_func(void *pvParams) 
  {
   // Setup()
   if (xSemaphoreTake(motorPowerMutex, portMAX_DELAY) == pdTRUE)
@@ -130,52 +254,50 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
     int leftMotorPowerLocal = leftPowerSnapshot;
     int rightMotorPowerLocal = rightPowerSnapshot;
 
-    #if REV_LEFT_DRIVE
+    if (config.revLeftDrive)
       leftMotorPowerLocal = leftMotorPowerLocal * -1;
-    #endif
 
-    #if REV_RIGHT_DRIVE
+    if (config.revRightDrive)
       rightMotorPowerLocal = rightMotorPowerLocal * -1;
-    #endif
 
-    #if SWAP_MOTORS
+    if (config.swapMotors) {
       leftMotorPowerLocal = leftMotorPowerLocal ^ rightMotorPowerLocal;
       rightMotorPowerLocal = leftMotorPowerLocal ^ rightMotorPowerLocal;
       leftMotorPowerLocal = leftMotorPowerLocal ^ rightMotorPowerLocal;
-    #endif
+    }
 
     // Smooth startup ramping
     if (abs(leftMotorPowerLocal) > 10) {
-      leftMotorRequestedPower = map(leftMotorPowerLocal, -100, 100, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
-      leftMotorRequestedPower = constrain(leftMotorRequestedPower, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
+      leftMotorRequestedPower = map(leftMotorPowerLocal, -100, 100, config.maxBwdLeftMotorPower, config.maxFwdLeftMotorPower);
+      leftMotorRequestedPower = constrain(leftMotorRequestedPower, config.maxBwdLeftMotorPower, config.maxFwdLeftMotorPower);
     } else {
       leftMotorRequestedPower = 0;
     }
 
     if (abs(rightMotorPowerLocal) > 10) {
-      rightMotorRequestedPower = map(rightMotorPowerLocal, -100, 100, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
-      rightMotorRequestedPower = constrain(rightMotorRequestedPower, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_RIGHT_MOTOR_POWER);
+      rightMotorRequestedPower = map(rightMotorPowerLocal, -100, 100, config.maxBwdRightMotorPower, config.maxFwdRightMotorPower);
+      rightMotorRequestedPower = constrain(rightMotorRequestedPower, config.maxBwdRightMotorPower, config.maxFwdRightMotorPower);
     } else {
       rightMotorRequestedPower = 0;
      }
 
 
      // Handle the acceleration and deceleration of the motors.
-     if (millis() - last_motor_increment_time > TIME_BTWN_MOTOR_INCREMENT_MS) {
+     if (millis() - last_motor_increment_time > config.timeBtwnMotorIncrementMs) {
         last_motor_increment_time = millis();
 
         if (leftMotorAppliedPower < leftMotorRequestedPower) {
-          leftMotorAppliedPower += min(MOTOR_POWER_INCREMENT, leftMotorRequestedPower - leftMotorAppliedPower);
+          leftMotorAppliedPower += min(config.motorPowerIncrement, leftMotorRequestedPower - leftMotorAppliedPower);
         } else if (leftMotorAppliedPower > leftMotorRequestedPower) {
-          leftMotorAppliedPower -= min(MOTOR_POWER_INCREMENT, leftMotorAppliedPower - leftMotorRequestedPower);
+          leftMotorAppliedPower -= min(config.motorPowerIncrement, leftMotorAppliedPower - leftMotorRequestedPower);
         } else {
           leftMotorAppliedPower = leftMotorRequestedPower;
         }
 
         if (rightMotorAppliedPower < rightMotorRequestedPower) {
-          rightMotorAppliedPower += min(MOTOR_POWER_INCREMENT, rightMotorRequestedPower - rightMotorAppliedPower); 
+          rightMotorAppliedPower += min(config.motorPowerIncrement, rightMotorRequestedPower - rightMotorAppliedPower); 
         } else if (rightMotorAppliedPower > rightMotorRequestedPower) {
-          rightMotorAppliedPower -= min(MOTOR_POWER_INCREMENT, rightMotorAppliedPower - rightMotorRequestedPower);
+          rightMotorAppliedPower -= min(config.motorPowerIncrement, rightMotorAppliedPower - rightMotorRequestedPower);
         } else {
           rightMotorAppliedPower = rightMotorRequestedPower; 
         }
@@ -194,7 +316,7 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
      }
      motorPrintCounter++;
  
-     vTaskDelay(MOTOR_LOOP_DELAY_MS / portTICK_PERIOD_MS);
+     vTaskDelay(config.motorLoopDelayMs / portTICK_PERIOD_MS);
    }
  }
   
@@ -202,30 +324,7 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
  //                Joystick Thread
  // ========================================================
  
- #define JOYSTICK_X_AXIS_PIN A2
- #define JOYSTICK_Y_AXIS_PIN A3
- 
- #define FLIP_X_AXIS false
- #define FLIP_Y_AXIS false
- #define X_Y_TRANSPOSE true
- 
- #define MAX_X_AXIS 1023
- #define MAX_Y_AXIS 1023
- 
- #define MID_X_AXIS 495
- #define MID_Y_AXIS 495
- 
- #define MIN_X_AXIS 0
- #define MIN_Y_AXIS 0
- 
- #define X_AXIS_DEADZONE 50
- #define Y_AXIS_DEADZONE 50
- 
- #define USE_SELF_CAL_JOYSTICK true
-
- #define JOYSTICK_LOOP_DELAY_MS 20
- 
- void joystick_func(void *pvParams)
+  void joystick_func(void *pvParams)
  {
    // setup()
    int xValue = 0;
@@ -233,16 +332,16 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
    int correctedXValue = 0;
    int correctedYValue= 0;
    int joystickPrintCount = 0;
-   int X_MID = MID_X_AXIS;
-   int Y_MID = MID_Y_AXIS;
+   int X_MID = config.midXAxis;
+   int Y_MID = config.midYAxis;
  
-   #if USE_SELF_CAL_JOYSTICK
+   if (config.useSelfCalJoystick) {
      // We are going to calibrate the joystick, so lets block.
      Serial.println("[Joystick Thread] Calibrating Joystick...");
      for (int i = 0; i < 256; i++)
      {
-       xValue = analogRead(JOYSTICK_X_AXIS_PIN);
-       yValue = analogRead(JOYSTICK_Y_AXIS_PIN);
+       xValue = analogRead(config.joystickXPin);
+       yValue = analogRead(config.joystickYPin);
  
        X_MID += xValue;
        Y_MID += yValue;
@@ -265,19 +364,10 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
     printf("[Joystick Thread] X_MID = %4d, Y_MID = %4d", X_MID, Y_MID);
     printf("[Joystick Thread] LeftMotor=%d, RightMotor=%d\n", leftMotorSnapshot, rightMotorSnapshot);
  
-   #endif
- 
-   #if FLIP_X_AXIS
-     const int xFlip = -1;
-   #else
-     const int xFlip = 1;
-   #endif
- 
-   #if FLIP_Y_AXIS
-     const int yFlip = -1;
-   #else
-     const int yFlip = 1;
-   #endif
+   }
+
+   const int xFlip = config.flipXAxis ? -1 : 1;
+   const int yFlip = config.flipYAxis ? -1 : 1;
  
    int scaledX = 0;
    int scaledY = 0;
@@ -289,37 +379,37 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
    for(;;)
    {
      // read analog X and Y analog values
-     xValue = analogRead(JOYSTICK_X_AXIS_PIN);
-     yValue = analogRead(JOYSTICK_Y_AXIS_PIN);
+     xValue = analogRead(config.joystickXPin);
+     yValue = analogRead(config.joystickYPin);
  
      correctedXValue = xValue;
      correctedYValue = yValue;
  
      // If the joystick values are close to the deadzones, let them be in the dead zone. 
      // Allows for some buffer.
-     if (xValue - X_MID < X_AXIS_DEADZONE && xValue - X_MID > -X_AXIS_DEADZONE )
+     if (xValue - X_MID < config.xAxisDeadzone && xValue - X_MID > -config.xAxisDeadzone )
      {
          correctedXValue = X_MID;
      }
-     if (yValue - Y_MID < Y_AXIS_DEADZONE && yValue - Y_MID > -Y_AXIS_DEADZONE )
+     if (yValue - Y_MID < config.yAxisDeadzone && yValue - Y_MID > -config.yAxisDeadzone )
      {
          correctedYValue = Y_MID;
      }
  
      // Now we need to scale the captured values, to values between -100 and 100.
-     scaledX = map(correctedXValue - X_MID, MIN_X_AXIS - X_MID, MAX_X_AXIS - X_MID, -100, 100);
-     scaledY = map(correctedYValue - Y_MID, MIN_Y_AXIS - Y_MID, MAX_Y_AXIS - Y_MID, -100, 100);
+     scaledX = map(correctedXValue - X_MID, config.minXAxis - X_MID, config.maxXAxis - X_MID, -100, 100);
+     scaledY = map(correctedYValue - Y_MID, config.minYAxis - Y_MID, config.maxYAxis - Y_MID, -100, 100);
      
  
      scaledX = scaledX * xFlip;
      scaledY = scaledY * yFlip;
  
-     #if X_Y_TRANSPOSE
+     if (config.xyTranspose) {
        // Transpose the two axis, don't allocate additional memory.
        scaledX = scaledX ^ scaledY;
        scaledY = scaledX ^ scaledY;
        scaledX = scaledX ^ scaledY;
-     #endif
+     }
  
     if (joystickPrintCount >= 10)
     {
@@ -374,10 +464,350 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
       xSemaphoreGive(motorPowerMutex);
     }
  
-     vTaskDelay(JOYSTICK_LOOP_DELAY_MS / portTICK_PERIOD_MS);
+     vTaskDelay(config.joystickLoopDelayMs / portTICK_PERIOD_MS);
    }
  }
  
+ // ========================================================
+ //                Serial Menu Task
+ // ========================================================
+ 
+void printMainMenu() {
+  Serial.println("\n==== Robot Configuration Menu ====");
+  Serial.println("1. View Current Settings");
+  Serial.println("2. Motor Settings");
+  Serial.println("3. Joystick Settings");
+  Serial.println("4. Save Settings to Flash");
+  Serial.println("5. Reset to Defaults");
+  Serial.println("0. Exit Menu");
+  Serial.print("Enter choice: ");
+}
+
+void printMotorMenu() {
+  Serial.println("\n---- Motor Settings ----");
+  Serial.println("1. Max Forward Left Motor Power");
+  Serial.println("2. Max Forward Right Motor Power");
+  Serial.println("3. Max Backward Left Motor Power");
+  Serial.println("4. Max Backward Right Motor Power");
+  Serial.println("5. Reverse Left Drive");
+  Serial.println("6. Reverse Right Drive");
+  Serial.println("7. Swap Motors");
+  Serial.println("8. Motor Power Increment");
+  Serial.println("9. Motor Loop Delay (ms)");
+  Serial.println("10. Time Between Motor Increments (ms)");
+  Serial.println("0. Back to Main Menu");
+  Serial.print("Enter choice: ");
+}
+
+void printJoystickMenu() {
+  Serial.println("\n---- Joystick Settings ----");
+  Serial.println("1. Flip X Axis");
+  Serial.println("2. Flip Y Axis");
+  Serial.println("3. X-Y Transpose");
+  Serial.println("4. Max X Axis");
+  Serial.println("5. Max Y Axis");
+  Serial.println("6. Mid X Axis");
+  Serial.println("7. Mid Y Axis");
+  Serial.println("8. Min X Axis");
+  Serial.println("9. Min Y Axis");
+  Serial.println("10. X Axis Deadzone");
+  Serial.println("11. Y Axis Deadzone");
+  Serial.println("12. Use Self Calibration");
+  Serial.println("13. Joystick Loop Delay (ms)");
+  Serial.println("0. Back to Main Menu");
+  Serial.print("Enter choice: ");
+}
+
+void printCurrentSettings() {
+  Serial.println("\n==== Current Settings ====");
+  Serial.println("--- Motor Settings ---");
+  Serial.println("Max Fwd Left Power: " + String(config.maxFwdLeftMotorPower));
+  Serial.println("Max Fwd Right Power: " + String(config.maxFwdRightMotorPower));
+  Serial.println("Max Bwd Left Power: " + String(config.maxBwdLeftMotorPower));
+  Serial.println("Max Bwd Right Power: " + String(config.maxBwdRightMotorPower));
+  Serial.println("Reverse Left Drive: " + String(config.revLeftDrive ? "Yes" : "No"));
+  Serial.println("Reverse Right Drive: " + String(config.revRightDrive ? "Yes" : "No"));
+  Serial.println("Swap Motors: " + String(config.swapMotors ? "Yes" : "No"));
+  Serial.println("Motor Power Increment: " + String(config.motorPowerIncrement));
+  Serial.println("Motor Loop Delay: " + String(config.motorLoopDelayMs) + " ms");
+  Serial.println("Motor Increment Time: " + String(config.timeBtwnMotorIncrementMs) + " ms");
+  
+  Serial.println("--- Joystick Settings ---");
+  Serial.println("Flip X Axis: " + String(config.flipXAxis ? "Yes" : "No"));
+  Serial.println("Flip Y Axis: " + String(config.flipYAxis ? "Yes" : "No"));
+  Serial.println("X-Y Transpose: " + String(config.xyTranspose ? "Yes" : "No"));
+  Serial.println("Max X Axis: " + String(config.maxXAxis));
+  Serial.println("Max Y Axis: " + String(config.maxYAxis));
+  Serial.println("Mid X Axis: " + String(config.midXAxis));
+  Serial.println("Mid Y Axis: " + String(config.midYAxis));
+  Serial.println("Min X Axis: " + String(config.minXAxis));
+  Serial.println("Min Y Axis: " + String(config.minYAxis));
+  Serial.println("X Deadzone: " + String(config.xAxisDeadzone));
+  Serial.println("Y Deadzone: " + String(config.yAxisDeadzone));
+  Serial.println("Use Self Calibration: " + String(config.useSelfCalJoystick ? "Yes" : "No"));
+  Serial.println("Joystick Loop Delay: " + String(config.joystickLoopDelayMs) + " ms");
+}
+
+int readIntegerInput(int minVal, int maxVal) {
+  while (!Serial.available()) {
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+  }
+  
+  String input = Serial.readStringUntil('\n');
+  input.trim();
+  int value = input.toInt();
+  
+  if (value == 0 && input != "0") {
+    Serial.println("Invalid input! Using previous value.");
+    return minVal; // Return minimum as fallback
+  }
+  
+  if (value < minVal || value > maxVal) {
+    Serial.println("Value out of range (" + String(minVal) + "-" + String(maxVal) + ")! Using constrained value.");
+    value = constrain(value, minVal, maxVal);
+  }
+  
+  return value;
+}
+
+bool readBoolInput() {
+  while (!Serial.available()) {
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+  }
+  
+  String input = Serial.readStringUntil('\n');
+  input.trim();
+  input.toLowerCase();
+  
+  if (input == "y" || input == "yes" || input == "1" || input == "true") {
+    return true;
+  } else if (input == "n" || input == "no" || input == "0" || input == "false") {
+    return false;
+  } else {
+    Serial.println("Invalid input! Enter y/n, yes/no, 1/0, or true/false. Using 'No' as default.");
+    return false;
+  }
+}
+
+void handleMotorSettings() {
+  int choice;
+  do {
+    printMotorMenu();
+    choice = readIntegerInput(0, 10);
+    Serial.println(choice);
+    
+    switch (choice) {
+      case 1:
+        Serial.println("Current: " + String(config.maxFwdLeftMotorPower));
+        Serial.print("Enter new Max Forward Left Motor Power (1-400): ");
+        config.maxFwdLeftMotorPower = readIntegerInput(1, 400);
+        Serial.println("Set to: " + String(config.maxFwdLeftMotorPower));
+        break;
+      case 2:
+        Serial.println("Current: " + String(config.maxFwdRightMotorPower));
+        Serial.print("Enter new Max Forward Right Motor Power (1-400): ");
+        config.maxFwdRightMotorPower = readIntegerInput(1, 400);
+        Serial.println("Set to: " + String(config.maxFwdRightMotorPower));
+        break;
+      case 3:
+        Serial.println("Current: " + String(config.maxBwdLeftMotorPower));
+        Serial.print("Enter new Max Backward Left Motor Power (-400 to -1): ");
+        config.maxBwdLeftMotorPower = readIntegerInput(-400, -1);
+        Serial.println("Set to: " + String(config.maxBwdLeftMotorPower));
+        break;
+      case 4:
+        Serial.println("Current: " + String(config.maxBwdRightMotorPower));
+        Serial.print("Enter new Max Backward Right Motor Power (-400 to -1): ");
+        config.maxBwdRightMotorPower = readIntegerInput(-400, -1);
+        Serial.println("Set to: " + String(config.maxBwdRightMotorPower));
+        break;
+      case 5:
+        Serial.println("Current: " + String(config.revLeftDrive ? "Yes" : "No"));
+        Serial.print("Reverse Left Drive (y/n): ");
+        config.revLeftDrive = readBoolInput();
+        Serial.println("Set to: " + String(config.revLeftDrive ? "Yes" : "No"));
+        break;
+      case 6:
+        Serial.println("Current: " + String(config.revRightDrive ? "Yes" : "No"));
+        Serial.print("Reverse Right Drive (y/n): ");
+        config.revRightDrive = readBoolInput();
+        Serial.println("Set to: " + String(config.revRightDrive ? "Yes" : "No"));
+        break;
+      case 7:
+        Serial.println("Current: " + String(config.swapMotors ? "Yes" : "No"));
+        Serial.print("Swap Motors (y/n): ");
+        config.swapMotors = readBoolInput();
+        Serial.println("Set to: " + String(config.swapMotors ? "Yes" : "No"));
+        break;
+      case 8:
+        Serial.println("Current: " + String(config.motorPowerIncrement));
+        Serial.print("Enter new Motor Power Increment (1-50): ");
+        config.motorPowerIncrement = readIntegerInput(1, 50);
+        Serial.println("Set to: " + String(config.motorPowerIncrement));
+        break;
+      case 9:
+        Serial.println("Current: " + String(config.motorLoopDelayMs));
+        Serial.print("Enter new Motor Loop Delay in ms (1-100): ");
+        config.motorLoopDelayMs = readIntegerInput(1, 100);
+        Serial.println("Set to: " + String(config.motorLoopDelayMs));
+        break;
+      case 10:
+        Serial.println("Current: " + String(config.timeBtwnMotorIncrementMs));
+        Serial.print("Enter new Time Between Motor Increments in ms (10-1000): ");
+        config.timeBtwnMotorIncrementMs = readIntegerInput(10, 1000);
+        Serial.println("Set to: " + String(config.timeBtwnMotorIncrementMs));
+        break;
+    }
+  } while (choice != 0);
+}
+
+void handleJoystickSettings() {
+  int choice;
+  do {
+    printJoystickMenu();
+    choice = readIntegerInput(0, 13);
+    Serial.println(choice);
+    
+    switch (choice) {
+      case 1:
+        Serial.println("Current: " + String(config.flipXAxis ? "Yes" : "No"));
+        Serial.print("Flip X Axis (y/n): ");
+        config.flipXAxis = readBoolInput();
+        Serial.println("Set to: " + String(config.flipXAxis ? "Yes" : "No"));
+        break;
+      case 2:
+        Serial.println("Current: " + String(config.flipYAxis ? "Yes" : "No"));
+        Serial.print("Flip Y Axis (y/n): ");
+        config.flipYAxis = readBoolInput();
+        Serial.println("Set to: " + String(config.flipYAxis ? "Yes" : "No"));
+        break;
+      case 3:
+        Serial.println("Current: " + String(config.xyTranspose ? "Yes" : "No"));
+        Serial.print("X-Y Transpose (y/n): ");
+        config.xyTranspose = readBoolInput();
+        Serial.println("Set to: " + String(config.xyTranspose ? "Yes" : "No"));
+        break;
+      case 4:
+        Serial.println("Current: " + String(config.maxXAxis));
+        Serial.print("Enter new Max X Axis (0-1023): ");
+        config.maxXAxis = readIntegerInput(0, 1023);
+        Serial.println("Set to: " + String(config.maxXAxis));
+        break;
+      case 5:
+        Serial.println("Current: " + String(config.maxYAxis));
+        Serial.print("Enter new Max Y Axis (0-1023): ");
+        config.maxYAxis = readIntegerInput(0, 1023);
+        Serial.println("Set to: " + String(config.maxYAxis));
+        break;
+      case 6:
+        Serial.println("Current: " + String(config.midXAxis));
+        Serial.print("Enter new Mid X Axis (0-1023): ");
+        config.midXAxis = readIntegerInput(0, 1023);
+        Serial.println("Set to: " + String(config.midXAxis));
+        break;
+      case 7:
+        Serial.println("Current: " + String(config.midYAxis));
+        Serial.print("Enter new Mid Y Axis (0-1023): ");
+        config.midYAxis = readIntegerInput(0, 1023);
+        Serial.println("Set to: " + String(config.midYAxis));
+        break;
+      case 8:
+        Serial.println("Current: " + String(config.minXAxis));
+        Serial.print("Enter new Min X Axis (0-1023): ");
+        config.minXAxis = readIntegerInput(0, 1023);
+        Serial.println("Set to: " + String(config.minXAxis));
+        break;
+      case 9:
+        Serial.println("Current: " + String(config.minYAxis));
+        Serial.print("Enter new Min Y Axis (0-1023): ");
+        config.minYAxis = readIntegerInput(0, 1023);
+        Serial.println("Set to: " + String(config.minYAxis));
+        break;
+      case 10:
+        Serial.println("Current: " + String(config.xAxisDeadzone));
+        Serial.print("Enter new X Axis Deadzone (0-200): ");
+        config.xAxisDeadzone = readIntegerInput(0, 200);
+        Serial.println("Set to: " + String(config.xAxisDeadzone));
+        break;
+      case 11:
+        Serial.println("Current: " + String(config.yAxisDeadzone));
+        Serial.print("Enter new Y Axis Deadzone (0-200): ");
+        config.yAxisDeadzone = readIntegerInput(0, 200);
+        Serial.println("Set to: " + String(config.yAxisDeadzone));
+        break;
+      case 12:
+        Serial.println("Current: " + String(config.useSelfCalJoystick ? "Yes" : "No"));
+        Serial.print("Use Self Calibration (y/n): ");
+        config.useSelfCalJoystick = readBoolInput();
+        Serial.println("Set to: " + String(config.useSelfCalJoystick ? "Yes" : "No"));
+        break;
+      case 13:
+        Serial.println("Current: " + String(config.joystickLoopDelayMs));
+        Serial.print("Enter new Joystick Loop Delay in ms (1-100): ");
+        config.joystickLoopDelayMs = readIntegerInput(1, 100);
+        Serial.println("Set to: " + String(config.joystickLoopDelayMs));
+        break;
+    }
+  } while (choice != 0);
+}
+
+void menu_task_func(void *pvParams) {
+  // Setup
+  Serial.println("\n[Menu Task] Serial menu system initialized.");
+  Serial.println("Send 'm' to open the configuration menu at any time.");
+  
+  // Main loop
+  for (;;) {
+    if (Serial.available()) {
+      char input = Serial.read();
+      
+      if (input == 'm' || input == 'M') {
+        // Clear any remaining input
+        while (Serial.available()) {
+          Serial.read();
+        }
+        
+        int choice;
+        do {
+          printMainMenu();
+          choice = readIntegerInput(0, 5);
+          Serial.println(choice);
+          
+          switch (choice) {
+            case 1:
+              printCurrentSettings();
+              break;
+            case 2:
+              handleMotorSettings();
+              break;
+            case 3:
+              handleJoystickSettings();
+              break;
+            case 4:
+              saveConfig();
+              Serial.println("Settings saved to flash memory!");
+              break;
+            case 5:
+              initDefaultConfig();
+              Serial.println("Settings reset to defaults!");
+              break;
+            case 0:
+              Serial.println("Exiting menu...");
+              break;
+            default:
+              Serial.println("Invalid choice!");
+              break;
+          }
+        } while (choice != 0);
+        
+        Serial.println("\nSend 'm' to open the configuration menu again.");
+      }
+    }
+    
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+  }
+}
+
   /**************************************************************************************
   * SETUP/LOOP
   **************************************************************************************/
@@ -386,6 +816,11 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
   {
     Serial.begin(115200);
     while (!Serial) { }
+    
+    // Initialize configuration system
+    initDefaultConfig();
+    loadConfig();
+    Serial.println("Configuration system initialized.");
   
       /* Init a task that calls 'loop'
      * since after the call to
@@ -459,6 +894,21 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
     
     if (rc_joystick != pdPASS) {
       Serial.println("Failed to create 'joystick' thread");
+      return;
+    }
+
+    auto const rc_menu = xTaskCreate
+      (
+        menu_task_func,
+        static_cast<const char*>("Menu Task"),
+        1024/4,
+        nullptr,
+        1,
+        &menu_task
+      );
+    
+    if (rc_menu != pdPASS) {
+      Serial.println("Failed to create 'menu' thread");
       return;
     }
   
