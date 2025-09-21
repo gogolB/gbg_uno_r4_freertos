@@ -2,11 +2,12 @@
  * INCLUDE
  **************************************************************************************/
 
- #include <Arduino_FreeRTOS.h>
- #include <LibPrintf.h>
- #include <DualVNH5019MotorShield.h>
- #include <ArduinoBLE.h>
- #include <Preferences.h>
+#include <Arduino_FreeRTOS.h>
+#include <LibPrintf.h>
+#include <DualVNH5019MotorShield.h>
+#include <ArduinoBLE.h>
+#include <Preferences.h>
+#include <semphr.h>
  
 /**************************************************************************************
 * GLOBAL VARIABLES
@@ -63,8 +64,9 @@
  
  // This is the motor power. A power of greater than 0 is forward.
  // A power of less than 0 is backward.
- int leftMotorPower = 0;
- int rightMotorPower = 0;
+int leftMotorPower = 0;
+int rightMotorPower = 0;
+SemaphoreHandle_t motorPowerMutex = nullptr;
  int motorPrintCounter = 0;
  
  void stopIfFault()
@@ -91,9 +93,13 @@
  #define TIME_BTWN_MOTOR_INCREMENT_MS 100 // Time between motor increments
  void motor_drive_func(void *pvParams) 
  {
-   // Setup()
-   leftMotorPower = 0;
-   rightMotorPower = 0;
+  // Setup()
+  if (xSemaphoreTake(motorPowerMutex, portMAX_DELAY) == pdTRUE)
+  {
+    leftMotorPower = 0;
+    rightMotorPower = 0;
+    xSemaphoreGive(motorPowerMutex);
+  }
  
    md.init();
  
@@ -107,36 +113,50 @@
    // loop()
    for (;;)
    {
-     leftMotorPower = constrain(leftMotorPower, -100, 100);
-     rightMotorPower = constrain(rightMotorPower, -100, 100);
- 
-     #if REV_LEFT_DRIVE
-       leftMotorPower = leftMotorPower * -1;
-     #endif
+    int leftPowerSnapshot = 0;
+    int rightPowerSnapshot = 0;
 
-     #if REV_RIGHT_DRIVE
-       rightMotorPower = rightMotorPower * -1;
-     #endif
- 
-     #if SWAP_MOTORS
-       leftMotorPower = leftMotorPower ^ rightMotorPower;
-       rightMotorPower = leftMotorPower ^ rightMotorPower;
-       leftMotorPower = leftMotorPower ^ rightMotorPower;
-     #endif
- 
-     // Smooth startup ramping
-     if (abs(leftMotorPower) > 10) {
-       leftMotorRequestedPower = map(leftMotorPower, -100, 100, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
-       leftMotorRequestedPower = constrain(leftMotorRequestedPower, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
-     } else {
-       leftMotorRequestedPower = 0;
-     }
- 
-     if (abs(rightMotorPower) > 10) {
-       rightMotorRequestedPower = map(rightMotorPower, -100, 100, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
-       rightMotorRequestedPower = constrain(rightMotorRequestedPower, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_RIGHT_MOTOR_POWER);
-     } else {
-       rightMotorRequestedPower = 0;
+    if (xSemaphoreTake(motorPowerMutex, portMAX_DELAY) == pdTRUE)
+    {
+      leftMotorPower = constrain(leftMotorPower, -100, 100);
+      rightMotorPower = constrain(rightMotorPower, -100, 100);
+
+      leftPowerSnapshot = leftMotorPower;
+      rightPowerSnapshot = rightMotorPower;
+
+      xSemaphoreGive(motorPowerMutex);
+    }
+
+    int leftMotorPowerLocal = leftPowerSnapshot;
+    int rightMotorPowerLocal = rightPowerSnapshot;
+
+    #if REV_LEFT_DRIVE
+      leftMotorPowerLocal = leftMotorPowerLocal * -1;
+    #endif
+
+    #if REV_RIGHT_DRIVE
+      rightMotorPowerLocal = rightMotorPowerLocal * -1;
+    #endif
+
+    #if SWAP_MOTORS
+      leftMotorPowerLocal = leftMotorPowerLocal ^ rightMotorPowerLocal;
+      rightMotorPowerLocal = leftMotorPowerLocal ^ rightMotorPowerLocal;
+      leftMotorPowerLocal = leftMotorPowerLocal ^ rightMotorPowerLocal;
+    #endif
+
+    // Smooth startup ramping
+    if (abs(leftMotorPowerLocal) > 10) {
+      leftMotorRequestedPower = map(leftMotorPowerLocal, -100, 100, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
+      leftMotorRequestedPower = constrain(leftMotorRequestedPower, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
+    } else {
+      leftMotorRequestedPower = 0;
+    }
+
+    if (abs(rightMotorPowerLocal) > 10) {
+      rightMotorRequestedPower = map(rightMotorPowerLocal, -100, 100, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
+      rightMotorRequestedPower = constrain(rightMotorRequestedPower, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_RIGHT_MOTOR_POWER);
+    } else {
+      rightMotorRequestedPower = 0;
      }
 
 
@@ -233,8 +253,17 @@
      Y_MID = Y_MID >> 8;
  
  
-     printf("[Joystick Thread] X_MID = %4d, Y_MID = %4d", X_MID, Y_MID);
-     printf("[Joystick Thread] LeftMotor=%d, RightMotor=%d\n", leftMotorPower, rightMotorPower);
+    int leftMotorSnapshot = 0;
+    int rightMotorSnapshot = 0;
+    if (xSemaphoreTake(motorPowerMutex, portMAX_DELAY) == pdTRUE)
+    {
+      leftMotorSnapshot = leftMotorPower;
+      rightMotorSnapshot = rightMotorPower;
+      xSemaphoreGive(motorPowerMutex);
+    }
+
+    printf("[Joystick Thread] X_MID = %4d, Y_MID = %4d", X_MID, Y_MID);
+    printf("[Joystick Thread] LeftMotor=%d, RightMotor=%d\n", leftMotorSnapshot, rightMotorSnapshot);
  
    #endif
  
@@ -292,48 +321,58 @@
        scaledX = scaledX ^ scaledY;
      #endif
  
-     if (joystickPrintCount >= 10)
-     {
-       //printf("[Joystick Thread] X=%4d, Y=%4d, Xc=%4d, Yc=%4d, Xs=%4d, Ys=%4d \n", xValue, yValue, correctedXValue, correctedYValue, scaledX, scaledY);
-       joystickPrintCount = 0;
-     }
-     joystickPrintCount++;
-     
-     // Now we have the motor data. We can calculate the arcade drive values.
-     maximum = max(abs(scaledY), abs(scaledX));
-     total =  scaledY + scaledX;
-     difference = scaledY - scaledX;
- 
-     if (scaledY >= 0)
-     {
-       if (scaledX >= 0)
-       {
-         // I quadrant
-         leftMotorPower = maximum;
-         rightMotorPower = difference;
-       }
-       else
-       {            
-         // II quadrant
-         leftMotorPower = total;
-         rightMotorPower = maximum;
-       }
-     }
-     else
-     {
-         if (scaledX >= 0)
-         {  
-           // IV quadrant
-           leftMotorPower = total;
-           rightMotorPower = -maximum;
-         }
-         else
-         {
-           // III quadrant
-           leftMotorPower = -maximum;
-           rightMotorPower = difference;
-         }
-     }
+    if (joystickPrintCount >= 10)
+    {
+      //printf("[Joystick Thread] X=%4d, Y=%4d, Xc=%4d, Yc=%4d, Xs=%4d, Ys=%4d \n", xValue, yValue, correctedXValue, correctedYValue, scaledX, scaledY);
+      joystickPrintCount = 0;
+    }
+    joystickPrintCount++;
+
+    // Now we have the motor data. We can calculate the arcade drive values.
+    maximum = max(abs(scaledY), abs(scaledX));
+    total =  scaledY + scaledX;
+    difference = scaledY - scaledX;
+
+    int newLeftMotorPower = 0;
+    int newRightMotorPower = 0;
+
+    if (scaledY >= 0)
+    {
+      if (scaledX >= 0)
+      {
+        // I quadrant
+        newLeftMotorPower = maximum;
+        newRightMotorPower = difference;
+      }
+      else
+      {
+        // II quadrant
+        newLeftMotorPower = total;
+        newRightMotorPower = maximum;
+      }
+    }
+    else
+    {
+        if (scaledX >= 0)
+        {
+          // IV quadrant
+          newLeftMotorPower = total;
+          newRightMotorPower = -maximum;
+        }
+        else
+        {
+          // III quadrant
+          newLeftMotorPower = -maximum;
+          newRightMotorPower = difference;
+        }
+    }
+
+    if (xSemaphoreTake(motorPowerMutex, portMAX_DELAY) == pdTRUE)
+    {
+      leftMotorPower = newLeftMotorPower;
+      rightMotorPower = newRightMotorPower;
+      xSemaphoreGive(motorPowerMutex);
+    }
  
      vTaskDelay(JOYSTICK_LOOP_DELAY_MS / portTICK_PERIOD_MS);
    }
@@ -386,6 +425,13 @@
       return;
     }
   
+    motorPowerMutex = xSemaphoreCreateMutex();
+    if (motorPowerMutex == nullptr)
+    {
+      Serial.println("Failed to create motor power mutex");
+      return;
+    }
+
     auto const rc_motor_drive = xTaskCreate
       (
         motor_drive_func,
