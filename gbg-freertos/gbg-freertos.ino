@@ -133,8 +133,8 @@
      }
  
      if (abs(rightMotorPower) > 10) {
-       rightMotorRequestedPower = map(rightMotorPower, -100, 100, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_LEFT_MOTOR_POWER);
-       rightMotorRequestedPower = constrain(rightMotorRequestedPower, MAX_BWD_LEFT_MOTOR_POWER, MAX_FWD_RIGHT_MOTOR_POWER);
+       rightMotorRequestedPower = map(rightMotorPower, -100, 100, MAX_BWD_RIGHT_MOTOR_POWER, MAX_FWD_RIGHT_MOTOR_POWER);
+       rightMotorRequestedPower = constrain(rightMotorRequestedPower, MAX_BWD_RIGHT_MOTOR_POWER, MAX_FWD_RIGHT_MOTOR_POWER);
      } else {
        rightMotorRequestedPower = 0;
      }
