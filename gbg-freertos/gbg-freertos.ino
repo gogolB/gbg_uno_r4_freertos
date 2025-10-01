@@ -7,7 +7,10 @@
 #include <DualVNH5019MotorShield.h>
 #include <ArduinoBLE.h>
 #include <Preferences.h>
-#include <semphr.h>
+
+// Lightweight protection for short shared-variable updates
+#define CRIT_BEGIN()  taskENTER_CRITICAL()
+#define CRIT_END()    taskEXIT_CRITICAL()
  
 /**************************************************************************************
 * GLOBAL VARIABLES
@@ -193,8 +196,7 @@ struct BluetoothInput {
   unsigned long lastUpdateTime;
 };
 
-BluetoothInput bluetoothInput = {false, 0, 0, false, 0};
-SemaphoreHandle_t bluetoothInputMutex = nullptr;
+volatile BluetoothInput bluetoothInput = {false, 0, 0, false, 0};
 
  void loop()
  {
@@ -234,11 +236,10 @@ SemaphoreHandle_t bluetoothInputMutex = nullptr;
  // Motor Driver shield definiation
  DualVNH5019MotorShield md;
  
- // This is the motor power. A power of greater than 0 is forward.
- // A power of less than 0 is backward.
-int leftMotorPower = 0;
-int rightMotorPower = 0;
-SemaphoreHandle_t motorPowerMutex = nullptr;
+// This is the motor power. A power of greater than 0 is forward.
+// A power of less than 0 is backward.
+volatile int leftMotorPower = 0;
+volatile int rightMotorPower = 0;
  int motorPrintCounter = 0;
  
  void stopIfFault()
@@ -263,12 +264,10 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
   void motor_drive_func(void *pvParams) 
  {
   // Setup()
-  if (xSemaphoreTake(motorPowerMutex, portMAX_DELAY) == pdTRUE)
-  {
-    leftMotorPower = 0;
-    rightMotorPower = 0;
-    xSemaphoreGive(motorPowerMutex);
-  }
+  CRIT_BEGIN();
+  leftMotorPower = 0;
+  rightMotorPower = 0;
+  CRIT_END();
  
    md.init();
  
@@ -277,7 +276,7 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
  
    int leftMotorAppliedPower = 0;
    int rightMotorAppliedPower = 0;
-   int last_motor_increment_time = 0;
+   unsigned long last_motor_increment_time = 0;
  
    // loop()
    for (;;)
@@ -285,16 +284,13 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
     int leftPowerSnapshot = 0;
     int rightPowerSnapshot = 0;
 
-    if (xSemaphoreTake(motorPowerMutex, portMAX_DELAY) == pdTRUE)
-    {
-      leftMotorPower = constrain(leftMotorPower, -100, 100);
-      rightMotorPower = constrain(rightMotorPower, -100, 100);
+    CRIT_BEGIN();
+    leftMotorPower = constrain(leftMotorPower, -100, 100);
+    rightMotorPower = constrain(rightMotorPower, -100, 100);
 
-      leftPowerSnapshot = leftMotorPower;
-      rightPowerSnapshot = rightMotorPower;
-
-      xSemaphoreGive(motorPowerMutex);
-    }
+    leftPowerSnapshot = leftMotorPower;
+    rightPowerSnapshot = rightMotorPower;
+    CRIT_END();
 
     int leftMotorPowerLocal = leftPowerSnapshot;
     int rightMotorPowerLocal = rightPowerSnapshot;
@@ -399,12 +395,10 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
  
     int leftMotorSnapshot = 0;
     int rightMotorSnapshot = 0;
-    if (xSemaphoreTake(motorPowerMutex, portMAX_DELAY) == pdTRUE)
-    {
-      leftMotorSnapshot = leftMotorPower;
-      rightMotorSnapshot = rightMotorPower;
-      xSemaphoreGive(motorPowerMutex);
-    }
+    CRIT_BEGIN();
+    leftMotorSnapshot = leftMotorPower;
+    rightMotorSnapshot = rightMotorPower;
+    CRIT_END();
 
     printf("[Joystick Thread] X_MID = %4d, Y_MID = %4d", X_MID, Y_MID);
     printf("[Joystick Thread] LeftMotor=%d, RightMotor=%d\n", leftMotorSnapshot, rightMotorSnapshot);
@@ -427,29 +421,27 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
      bool usingBluetoothInput = false;
      bool bluetoothStopCommand = false;
      
-     if (config.bluetoothEnabled && config.bluetoothOverrideLocal) {
-       if (xSemaphoreTake(bluetoothInputMutex, portMAX_DELAY) == pdTRUE) {
-         if (bluetoothInput.active) {
-           // Use Bluetooth input instead of local joystick
-           scaledX = bluetoothInput.xValue;
-           scaledY = bluetoothInput.yValue;
-           usingBluetoothInput = true;
-         }
-         if (bluetoothInput.stopCommand) {
-           bluetoothStopCommand = true;
-           bluetoothInput.stopCommand = false; // Clear the flag
-         }
-         xSemaphoreGive(bluetoothInputMutex);
-       }
-     }
+    if (config.bluetoothEnabled && config.bluetoothOverrideLocal) {
+      CRIT_BEGIN();
+      if (bluetoothInput.active) {
+        // Use Bluetooth input instead of local joystick
+        scaledX = bluetoothInput.xValue;
+        scaledY = bluetoothInput.yValue;
+        usingBluetoothInput = true;
+      }
+      if (bluetoothInput.stopCommand) {
+        bluetoothStopCommand = true;
+        bluetoothInput.stopCommand = false; // Clear the flag
+      }
+      CRIT_END();
+    }
      
      // Handle stop command immediately
-     if (bluetoothStopCommand) {
-       if (xSemaphoreTake(motorPowerMutex, portMAX_DELAY) == pdTRUE) {
-         leftMotorPower = 0;
-         rightMotorPower = 0;
-         xSemaphoreGive(motorPowerMutex);
-       }
+    if (bluetoothStopCommand) {
+      CRIT_BEGIN();
+      leftMotorPower = 0;
+      rightMotorPower = 0;
+      CRIT_END();
        Serial.println("[Joystick Thread] Emergency stop executed!");
        vTaskDelay(config.joystickLoopDelayMs / portTICK_PERIOD_MS);
        continue;
@@ -539,12 +531,10 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
         }
     }
 
-    if (xSemaphoreTake(motorPowerMutex, portMAX_DELAY) == pdTRUE)
-    {
-      leftMotorPower = newLeftMotorPower;
-      rightMotorPower = newRightMotorPower;
-      xSemaphoreGive(motorPowerMutex);
-    }
+    CRIT_BEGIN();
+    leftMotorPower = newLeftMotorPower;
+    rightMotorPower = newRightMotorPower;
+    CRIT_END();
  
      vTaskDelay(config.joystickLoopDelayMs / portTICK_PERIOD_MS);
    }
@@ -615,12 +605,11 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
      } else if (!isConnected && wasConnected) {
        Serial.println("[Bluetooth Thread] Device disconnected!");
        
-       // Clear Bluetooth input when disconnected
-       if (xSemaphoreTake(bluetoothInputMutex, portMAX_DELAY) == pdTRUE) {
-         bluetoothInput.active = false;
-         bluetoothInput.stopCommand = false;
-         xSemaphoreGive(bluetoothInputMutex);
-       }
+      // Clear Bluetooth input when disconnected
+      CRIT_BEGIN();
+      bluetoothInput.active = false;
+      bluetoothInput.stopCommand = false;
+      CRIT_END();
      }
      
      wasConnected = isConnected;
@@ -635,13 +624,12 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
          int16_t x = (data[1] << 8) | data[0];
          int16_t y = (data[3] << 8) | data[2];
          
-         if (xSemaphoreTake(bluetoothInputMutex, portMAX_DELAY) == pdTRUE) {
-           bluetoothInput.active = true;
-           bluetoothInput.xValue = x;
-           bluetoothInput.yValue = y;
-           bluetoothInput.lastUpdateTime = millis();
-           xSemaphoreGive(bluetoothInputMutex);
-         }
+        CRIT_BEGIN();
+        bluetoothInput.active = true;
+        bluetoothInput.xValue = x;
+        bluetoothInput.yValue = y;
+        bluetoothInput.lastUpdateTime = millis();
+        CRIT_END();
          
          printf("[Bluetooth Thread] Joystick data: X=%d, Y=%d\n", x, y);
        }
@@ -651,25 +639,23 @@ SemaphoreHandle_t motorPowerMutex = nullptr;
          uint8_t stopValue = 0;
          stopCharacteristic.readValue(stopValue);
          
-         if (stopValue != 0) {
-           if (xSemaphoreTake(bluetoothInputMutex, portMAX_DELAY) == pdTRUE) {
-             bluetoothInput.stopCommand = true;
-             bluetoothInput.lastUpdateTime = millis();
-             xSemaphoreGive(bluetoothInputMutex);
-           }
+        if (stopValue != 0) {
+          CRIT_BEGIN();
+          bluetoothInput.stopCommand = true;
+          bluetoothInput.lastUpdateTime = millis();
+          CRIT_END();
            
            Serial.println("[Bluetooth Thread] Stop command received!");
          }
        }
        
        // Check for Bluetooth timeout
-       if (xSemaphoreTake(bluetoothInputMutex, portMAX_DELAY) == pdTRUE) {
-         if (bluetoothInput.active && (millis() - bluetoothInput.lastUpdateTime > config.bluetoothTimeoutMs)) {
-           bluetoothInput.active = false;
-           Serial.println("[Bluetooth Thread] Bluetooth input timeout");
-         }
-         xSemaphoreGive(bluetoothInputMutex);
-       }
+      CRIT_BEGIN();
+      if (bluetoothInput.active && (millis() - bluetoothInput.lastUpdateTime > config.bluetoothTimeoutMs)) {
+        bluetoothInput.active = false;
+        Serial.println("[Bluetooth Thread] Bluetooth input timeout");
+      }
+      CRIT_END();
      }
      
      // Try to reconnect to known device if not connected and we have a saved address
@@ -1177,20 +1163,6 @@ void menu_task_func(void *pvParams) {
       return;
     }
   
-    motorPowerMutex = xSemaphoreCreateMutex();
-    if (motorPowerMutex == nullptr)
-    {
-      Serial.println("Failed to create motor power mutex");
-      return;
-    }
-
-    bluetoothInputMutex = xSemaphoreCreateMutex();
-    if (bluetoothInputMutex == nullptr)
-    {
-      Serial.println("Failed to create bluetooth input mutex");
-      return;
-    }
-
     auto const rc_motor_drive = xTaskCreate
       (
         motor_drive_func,
