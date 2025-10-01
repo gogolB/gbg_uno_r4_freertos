@@ -2,11 +2,11 @@
  * INCLUDE
  **************************************************************************************/
 
-#include <Arduino_FreeRTOS.h>
-#include <LibPrintf.h>
-#include <DualVNH5019MotorShield.h>
-#include <ArduinoBLE.h>
-#include <Preferences.h>
+#include <Arduino_FreeRTOS.h> // DO NOT Install this one, this one exists automatically for Uno R4+
+#include <LibPrintf.h> // Install this one
+#include <DualVNH5019MotorShield.h> // Install this one
+#include <ArduinoBLE.h> // Install this one
+#include <Preferences.h> // Install this one.
 
 // Lightweight protection for short shared-variable updates
 #define CRIT_BEGIN()  taskENTER_CRITICAL()
@@ -74,8 +74,8 @@ void initDefaultConfig() {
   config.timeBtwnMotorIncrementMs = 100;
   
   // Joystick settings defaults
-  config.joystickXPin = A2;
-  config.joystickYPin = A3;
+  config.joystickXPin = A3;
+  config.joystickYPin = A2;
   config.flipXAxis = false;
   config.flipYAxis = false;
   config.xyTranspose = true;
@@ -351,8 +351,8 @@ volatile int rightMotorPower = 0;
      int right_motor_current = md.getM2CurrentMilliamps();
  
      if (motorPrintCounter >= 10) {
-       printf("[Motor Dr Thread] LRP=%5d, RRP=%5d, | LMAP=%5d, RMAP=%5d | LM_CUR=%5d mA, RM_CUR=%5d mA \n", 
-               leftMotorRequestedPower, rightMotorRequestedPower, leftMotorAppliedPower, rightMotorAppliedPower, left_motor_current, right_motor_current);
+       //printf("[Motor Dr Thread] LRP=%5d, RRP=%5d, | LMAP=%5d, RMAP=%5d | LM_CUR=%5d mA, RM_CUR=%5d mA \n", 
+       //        leftMotorRequestedPower, rightMotorRequestedPower, leftMotorAppliedPower, rightMotorAppliedPower, left_motor_current, right_motor_current);
        motorPrintCounter = 0;
      }
      motorPrintCounter++;
