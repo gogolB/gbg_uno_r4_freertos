@@ -1,76 +1,49 @@
 # GBG UNO R4 FreeRTOS Robot - Bluetooth Integration
 
 ## Overview
-This project adds Bluetooth functionality to the GBG robot, allowing remote control via Bluetooth Low Energy (BLE).
+This project provides Bluetooth Low Energy (BLE) control and configuration for the GBG power chair retrofit running on an Arduino UNO R4 with FreeRTOS. Two ready-to-flash sketches now ship side by side:
+
+- **`gbg-freertos.ino` (Joystick Build)** – retains the original analog joystick task and allows the companion Bluetooth app to steer with remote X/Y data. Local joystick input can still be used when Bluetooth is disabled or times out.
+- **`gbg-freertos-footpedal.ino` (Foot-Pedal Build)** – replaces the joystick task with a digital foot pedal throttle and forward/reverse toggle switch. Bluetooth is only used for the emergency stop characteristic; pedal and toggle inputs always determine direction.
+
+### Choosing a Sketch
+- Flash **`gbg-freertos.ino`** when the mobility base is equipped with the stock joystick pod or another analog stick that feeds the UNO R4.
+- Flash **`gbg-freertos-footpedal.ino`** when the joystick has been removed and driving is handled by a normally-open foot pedal plus a direction selector switch. This build reuses the same motor ramp/limit logic as the joystick version so parental speed limits still apply.
 
 ## Bluetooth Features
 
-### Remote Control
-- **Joystick Input**: Receive X,Y axis values from remote Bluetooth device
-- **Stop Command**: Emergency stop functionality via Bluetooth
-- **Input Priority**: Bluetooth inputs override local joystick when connected
+### Common Features
+- **Stop Command:** Both sketches expose a stop characteristic that instantly zeroes motor power when a non-zero value is written.
+- **Device Management:** Paired device info is stored in flash and reused on reboot. The serial menu can clear the pairing or re-enter pairing mode.
+- **Timeout Handling:** Configurable timeout releases the stop command if no BLE update is received for the configured window.
 
-### Device Management
-- **Automatic Pairing**: First connected device is automatically paired and remembered
-- **Persistent Storage**: Paired device information stored in flash memory
-- **Auto-reconnection**: Robot attempts to reconnect to known devices on startup
+### Additional Joystick-Build Features (`gbg-freertos.ino`)
+- **Remote Joystick Input:** BLE X/Y values can drive the motors when override is enabled.
+- **Input Priority:** Remote data can take priority over the local joystick until a timeout occurs.
 
-### Configuration
-Access Bluetooth settings through the serial menu (send 'm'):
-1. **Enable/Disable Bluetooth**: Turn Bluetooth functionality on/off
-2. **Override Local Input**: Configure whether Bluetooth overrides local joystick
-3. **Timeout Settings**: Configure connection timeout (1-30 seconds)
-4. **Pairing Mode**: Enter pairing mode to connect new devices
-5. **Device Management**: Clear paired devices or view device information
+### Additional Foot-Pedal-Build Features (`gbg-freertos-footpedal.ino`)
+- **Digital Pedal Mapping:** Reads a debounced foot pedal switch and forward/reverse toggle, translating them into motor commands that respect configured ramps and limits.
+- **Local Priority:** Direction and throttle always come from the pedal/toggle hardware. The BLE stop command is the only remote override and can be disabled entirely via the serial menu.
 
 ## Bluetooth Protocol
+- **Service UUID:** `12345678-1234-1234-1234-123456789abc`
+- **Stop Characteristic (`12345678-1234-1234-1234-123456789abe`):** Single byte where zero releases the stop and non-zero engages it.
+- **Joystick Characteristic (`12345678-1234-1234-1234-123456789abd`):** Only used by the joystick build; provides signed 16-bit X/Y values encoded in an 8-byte payload.
 
-### Service UUID
-- Service: `12345678-1234-1234-1234-123456789abc`
+## Configuration via Serial Menu
+Send `m` over the USB serial console to open the configuration UI. Relevant options include:
 
-### Characteristics
-1. **Joystick Data** (`12345678-1234-1234-1234-123456789abd`)
-   - Format: 8 bytes (X low, X high, Y low, Y high + 4 padding bytes)
-   - X,Y values: 16-bit signed integers (-100 to +100 range)
-   - Properties: Read, Write, Notify
+1. **Motor Settings:** Adjust maximum motor power, ramp increments, and loop timing.
+2. **Foot Pedal Settings (foot-pedal build) / Joystick Settings (joystick build):** Configure input polarity, debounce timing, and loop cadence for the selected control hardware.
+3. **Bluetooth Settings:** Enable/disable BLE, toggle the "Allow Stop Command" option, configure timeout, manage paired devices, and re-enter pairing mode.
+4. **Save/Reset:** Persist changes to flash or revert to defaults.
 
-2. **Stop Command** (`12345678-1234-1234-1234-123456789abe`)
-   - Format: 1 byte (0 = no stop, non-zero = stop)
-   - Properties: Read, Write, Notify
+## Pairing and Command Flow
+1. Enter the Bluetooth settings menu and choose "Enter Pairing Mode" to clear any stored device.
+2. Connect from the companion app to the advertised "GBG Robot" peripheral.
+3. Joystick build clients can stream joystick packets to the joystick characteristic; both builds can trigger the stop by writing a non-zero byte to the stop characteristic.
+4. When "Allow Stop Command" is disabled (foot-pedal build default is enabled), incoming stop writes are ignored and the characteristic is reset to zero.
 
-## Usage
-
-### Pairing a New Device
-1. Send 'm' via serial to open configuration menu
-2. Select "4. Bluetooth Settings"
-3. Select "4. Enter Pairing Mode"
-4. Connect from your Bluetooth device to "GBG Robot"
-5. Device will be automatically paired and saved
-
-### Sending Commands
-- **Joystick Control**: Write 8-byte array to joystick characteristic
-- **Emergency Stop**: Write non-zero value to stop characteristic
-
-### Configuration Options
-- **Bluetooth Enabled**: Enable/disable Bluetooth functionality
-- **Override Local**: Whether Bluetooth input overrides local joystick
-- **Timeout**: How long to wait for Bluetooth data before switching back to local input
-
-## Implementation Details
-
-### Thread Safety
-- Uses FreeRTOS mutexes to protect shared motor power and Bluetooth input variables
-- Bluetooth inputs are checked atomically in the joystick thread
-
-### Priority System
-When Bluetooth is enabled and override is configured:
-1. Check for Bluetooth input first
-2. If valid Bluetooth data available, use it instead of local joystick
-3. If no Bluetooth data or timeout, fall back to local joystick
-4. Stop commands are processed immediately regardless of other input
-
-### Persistence
-Bluetooth configuration and paired device information is stored in ESP32 Preferences:
-- Device name and MAC address
-- Bluetooth enable/disable state
-- Override and timeout settings
+## Implementation Notes
+- All shared state between FreeRTOS tasks is protected with critical sections.
+- Motor ramping, parental speed limits, and Bluetooth storage reuse the same code paths in both sketches, ensuring consistent behaviour regardless of input hardware.
