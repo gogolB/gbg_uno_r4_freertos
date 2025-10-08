@@ -186,6 +186,111 @@ void saveConfig() {
 BLEService robotControlService("12345678-1234-1234-1234-123456789abc");
 BLECharacteristic joystickCharacteristic("12345678-1234-1234-1234-123456789abd", BLERead | BLEWrite | BLENotify, 8);
 BLECharacteristic stopCharacteristic("12345678-1234-1234-1234-123456789abe", BLERead | BLEWrite | BLENotify, 1);
+// Motor configuration payload is 12 bytes laid out as little-endian values:
+// [0-1]  int16  maxFwdLeftMotorPower    (valid range: 0 to +400)
+// [2-3]  int16  maxFwdRightMotorPower   (valid range: 0 to +400)
+// [4-5]  int16  maxBwdLeftMotorPower    (valid range: -400 to 0)
+// [6-7]  int16  maxBwdRightMotorPower   (valid range: -400 to 0)
+// [8-9]  uint16 motorPowerIncrement     (valid range: 1 to 100)
+// [10-11]uint16 timeBtwnMotorIncrementMs(valid range: 5 to 2000)
+// The device responds on the same characteristic with a 13-byte packet
+// where byte [0] is the acknowledgement code (0=idle, 1=success, 2=failure,
+// 3=current config snapshot) followed by the sanitized configuration payload
+// described above. The central can request the latest configuration without
+// modifying anything by writing an empty payload (or any payload shorter than
+// 12 bytes), which prompts the peripheral to emit acknowledgement code 3 with
+// the current configuration values.
+BLECharacteristic motorConfigCharacteristic("12345678-1234-1234-1234-123456789abf", BLERead | BLEWrite | BLENotify, 13);
+
+const int16_t MOTOR_POWER_LIMIT = 400;
+const uint16_t MOTOR_POWER_INCREMENT_MIN = 1;
+const uint16_t MOTOR_POWER_INCREMENT_MAX = 100;
+const uint16_t MOTOR_INCREMENT_TIME_MIN = 5;
+const uint16_t MOTOR_INCREMENT_TIME_MAX = 2000;
+
+const uint8_t MOTOR_CONFIG_ACK_IDLE = 0x00;
+const uint8_t MOTOR_CONFIG_ACK_SUCCESS = 0x01;
+const uint8_t MOTOR_CONFIG_ACK_FAILURE = 0x02;
+const uint8_t MOTOR_CONFIG_ACK_CURRENT = 0x03;
+
+const size_t MOTOR_CONFIG_PAYLOAD_SIZE = 12;
+const size_t MOTOR_CONFIG_RESPONSE_SIZE = 13;
+
+struct MotorConfigUpdate {
+  int16_t maxFwdLeftMotorPower;
+  int16_t maxFwdRightMotorPower;
+  int16_t maxBwdLeftMotorPower;
+  int16_t maxBwdRightMotorPower;
+  uint16_t motorPowerIncrement;
+  uint16_t timeBtwnMotorIncrementMs;
+};
+
+void writeInt16LE(uint8_t *buffer, int16_t value) {
+  buffer[0] = lowByte(value);
+  buffer[1] = highByte(value);
+}
+
+void writeUInt16LE(uint8_t *buffer, uint16_t value) {
+  buffer[0] = lowByte(value);
+  buffer[1] = highByte(value);
+}
+
+void packMotorConfigPayload(uint8_t *buffer, const RobotConfig &source) {
+  writeInt16LE(&buffer[0], static_cast<int16_t>(source.maxFwdLeftMotorPower));
+  writeInt16LE(&buffer[2], static_cast<int16_t>(source.maxFwdRightMotorPower));
+  writeInt16LE(&buffer[4], static_cast<int16_t>(source.maxBwdLeftMotorPower));
+  writeInt16LE(&buffer[6], static_cast<int16_t>(source.maxBwdRightMotorPower));
+  writeUInt16LE(&buffer[8], static_cast<uint16_t>(source.motorPowerIncrement));
+  writeUInt16LE(&buffer[10], static_cast<uint16_t>(source.timeBtwnMotorIncrementMs));
+}
+
+void publishMotorConfigResponse(uint8_t statusCode) {
+  uint8_t response[MOTOR_CONFIG_RESPONSE_SIZE];
+  response[0] = statusCode;
+  packMotorConfigPayload(&response[1], config);
+  motorConfigCharacteristic.writeValue(response, MOTOR_CONFIG_RESPONSE_SIZE);
+}
+
+bool decodeMotorConfigPayload(const uint8_t *data, size_t length, MotorConfigUpdate &update, String &errorMessage) {
+  if (length != MOTOR_CONFIG_PAYLOAD_SIZE) {
+    errorMessage = "Invalid payload length";
+    return false;
+  }
+
+  update.maxFwdLeftMotorPower = static_cast<int16_t>((data[1] << 8) | data[0]);
+  update.maxFwdRightMotorPower = static_cast<int16_t>((data[3] << 8) | data[2]);
+  update.maxBwdLeftMotorPower = static_cast<int16_t>((data[5] << 8) | data[4]);
+  update.maxBwdRightMotorPower = static_cast<int16_t>((data[7] << 8) | data[6]);
+  update.motorPowerIncrement = static_cast<uint16_t>((data[9] << 8) | data[8]);
+  update.timeBtwnMotorIncrementMs = static_cast<uint16_t>((data[11] << 8) | data[10]);
+
+  if (update.maxFwdLeftMotorPower < 0 || update.maxFwdLeftMotorPower > MOTOR_POWER_LIMIT) {
+    errorMessage = "maxFwdLeftMotorPower out of range";
+    return false;
+  }
+  if (update.maxFwdRightMotorPower < 0 || update.maxFwdRightMotorPower > MOTOR_POWER_LIMIT) {
+    errorMessage = "maxFwdRightMotorPower out of range";
+    return false;
+  }
+  if (update.maxBwdLeftMotorPower > 0 || update.maxBwdLeftMotorPower < -MOTOR_POWER_LIMIT) {
+    errorMessage = "maxBwdLeftMotorPower out of range";
+    return false;
+  }
+  if (update.maxBwdRightMotorPower > 0 || update.maxBwdRightMotorPower < -MOTOR_POWER_LIMIT) {
+    errorMessage = "maxBwdRightMotorPower out of range";
+    return false;
+  }
+  if (update.motorPowerIncrement < MOTOR_POWER_INCREMENT_MIN || update.motorPowerIncrement > MOTOR_POWER_INCREMENT_MAX) {
+    errorMessage = "motorPowerIncrement out of range";
+    return false;
+  }
+  if (update.timeBtwnMotorIncrementMs < MOTOR_INCREMENT_TIME_MIN || update.timeBtwnMotorIncrementMs > MOTOR_INCREMENT_TIME_MAX) {
+    errorMessage = "timeBtwnMotorIncrementMs out of range";
+    return false;
+  }
+
+  return true;
+}
 
 // Bluetooth input state
 struct BluetoothInput {
@@ -559,8 +664,9 @@ volatile int rightMotorPower = 0;
    BLE.setAdvertisedService(robotControlService);
    
    // Add characteristics to service
-   robotControlService.addCharacteristic(joystickCharacteristic);
-   robotControlService.addCharacteristic(stopCharacteristic);
+  robotControlService.addCharacteristic(joystickCharacteristic);
+  robotControlService.addCharacteristic(stopCharacteristic);
+  robotControlService.addCharacteristic(motorConfigCharacteristic);
    
    // Add service
    BLE.addService(robotControlService);
@@ -569,8 +675,10 @@ volatile int rightMotorPower = 0;
    uint8_t joystickData[8] = {0, 0, 0, 0, 0, 0, 0, 0}; // x low, x high, y low, y high + padding
    joystickCharacteristic.writeValue(joystickData, 8);
    
-   uint8_t stopData = 0;
-   stopCharacteristic.writeValue(stopData);
+  uint8_t stopData = 0;
+  stopCharacteristic.writeValue(stopData);
+
+  publishMotorConfigResponse(MOTOR_CONFIG_ACK_IDLE);
    
    // Start advertising
    BLE.advertise();
@@ -586,11 +694,15 @@ volatile int rightMotorPower = 0;
      bool isConnected = BLE.connected();
      
      if (isConnected && !wasConnected) {
-       Serial.println("[Bluetooth Thread] Device connected!");
-       
-       // Save connected device info if not already saved
-       BLEDevice central = BLE.central();
-       if (central && strlen(config.pairedDeviceAddress) == 0) {
+      Serial.println("[Bluetooth Thread] Device connected!");
+
+      // Share the current configuration snapshot with the new central so it can
+      // immediately display the robot's motor limits.
+      publishMotorConfigResponse(MOTOR_CONFIG_ACK_CURRENT);
+
+      // Save connected device info if not already saved
+      BLEDevice central = BLE.central();
+      if (central && strlen(config.pairedDeviceAddress) == 0) {
          String address = central.address();
          address.toCharArray(config.pairedDeviceAddress, sizeof(config.pairedDeviceAddress));
          String localName = central.localName();
@@ -602,7 +714,7 @@ volatile int rightMotorPower = 0;
          saveConfig();
          Serial.println("[Bluetooth Thread] Device paired and saved: " + String(config.pairedDeviceName));
        }
-     } else if (!isConnected && wasConnected) {
+    } else if (!isConnected && wasConnected) {
        Serial.println("[Bluetooth Thread] Device disconnected!");
        
       // Clear Bluetooth input when disconnected
@@ -638,17 +750,74 @@ volatile int rightMotorPower = 0;
        if (stopCharacteristic.written()) {
          uint8_t stopValue = 0;
          stopCharacteristic.readValue(stopValue);
-         
+
         if (stopValue != 0) {
           CRIT_BEGIN();
           bluetoothInput.stopCommand = true;
           bluetoothInput.lastUpdateTime = millis();
           CRIT_END();
-           
+
            Serial.println("[Bluetooth Thread] Stop command received!");
          }
        }
-       
+
+      if (motorConfigCharacteristic.written()) {
+        int valueLength = motorConfigCharacteristic.valueLength();
+        uint8_t rawData[MOTOR_CONFIG_RESPONSE_SIZE];
+        int bytesRead = 0;
+
+        if (valueLength > 0) {
+          bytesRead = motorConfigCharacteristic.readValue(rawData, min(valueLength, static_cast<int>(sizeof(rawData))));
+        }
+
+        if (valueLength < static_cast<int>(MOTOR_CONFIG_PAYLOAD_SIZE)) {
+          Serial.println("[Bluetooth Thread] Motor config snapshot requested by central");
+          publishMotorConfigResponse(MOTOR_CONFIG_ACK_CURRENT);
+        } else {
+          const uint8_t *payloadPtr = rawData;
+          size_t payloadLength = bytesRead;
+
+          if (bytesRead == MOTOR_CONFIG_RESPONSE_SIZE) {
+            payloadPtr = &rawData[1];
+            payloadLength = MOTOR_CONFIG_PAYLOAD_SIZE;
+          }
+
+          MotorConfigUpdate update;
+          String errorMessage = "";
+
+          if (!decodeMotorConfigPayload(payloadPtr, payloadLength, update, errorMessage)) {
+            Serial.println("[Bluetooth Thread] Motor config update rejected: " + errorMessage);
+            publishMotorConfigResponse(MOTOR_CONFIG_ACK_FAILURE);
+          } else {
+            CRIT_BEGIN();
+            config.maxFwdLeftMotorPower = update.maxFwdLeftMotorPower;
+            config.maxFwdRightMotorPower = update.maxFwdRightMotorPower;
+            config.maxBwdLeftMotorPower = update.maxBwdLeftMotorPower;
+            config.maxBwdRightMotorPower = update.maxBwdRightMotorPower;
+            config.motorPowerIncrement = update.motorPowerIncrement;
+            config.timeBtwnMotorIncrementMs = update.timeBtwnMotorIncrementMs;
+            CRIT_END();
+
+            saveConfig();
+
+            Serial.print("[Bluetooth Thread] Motor config updated. Fwd L/R: ");
+            Serial.print(config.maxFwdLeftMotorPower);
+            Serial.print("/");
+            Serial.print(config.maxFwdRightMotorPower);
+            Serial.print("  Bwd L/R: ");
+            Serial.print(config.maxBwdLeftMotorPower);
+            Serial.print("/");
+            Serial.print(config.maxBwdRightMotorPower);
+            Serial.print("  Inc: ");
+            Serial.print(config.motorPowerIncrement);
+            Serial.print("  Delay: ");
+            Serial.println(config.timeBtwnMotorIncrementMs);
+
+            publishMotorConfigResponse(MOTOR_CONFIG_ACK_SUCCESS);
+          }
+        }
+      }
+
        // Check for Bluetooth timeout
       CRIT_BEGIN();
       if (bluetoothInput.active && (millis() - bluetoothInput.lastUpdateTime > config.bluetoothTimeoutMs)) {
