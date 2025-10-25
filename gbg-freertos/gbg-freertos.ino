@@ -2,6 +2,13 @@
  * INCLUDE
  **************************************************************************************/
 
+#include "gbg-variant.h"
+
+struct RobotConfig;
+struct MotorConfigUpdate;
+
+#if !GBG_VARIANT_FOOT_PEDAL
+
 #include <Arduino_FreeRTOS.h> // DO NOT Install this one, this one exists automatically for Uno R4+
 #include <LibPrintf.h> // Install this one
 #include <DualVNH5019MotorShield.h> // Install this one
@@ -13,8 +20,8 @@
 #define CRIT_END()    taskEXIT_CRITICAL()
  
 /**************************************************************************************
-* GLOBAL VARIABLES
-**************************************************************************************/
+ * GLOBAL VARIABLES
+ **************************************************************************************/
 
 // Configuration structure for all configurable parameters
 struct RobotConfig {
@@ -133,6 +140,7 @@ void loadConfig() {
   config.bluetoothEnabled = preferences.getBool("btEnabled", config.bluetoothEnabled);
   preferences.getString("btDeviceName", config.pairedDeviceName, sizeof(config.pairedDeviceName));
   preferences.getString("btDeviceAddr", config.pairedDeviceAddress, sizeof(config.pairedDeviceAddress));
+  config.bluetoothOverrideLocal = preferences.getBool("btOverrideLocal", config.bluetoothOverrideLocal);
   config.bluetoothOverrideLocal = preferences.getBool("btOverride", config.bluetoothOverrideLocal);
   config.bluetoothTimeoutMs = preferences.getInt("btTimeout", config.bluetoothTimeoutMs);
   
@@ -174,6 +182,7 @@ void saveConfig() {
   preferences.putBool("btEnabled", config.bluetoothEnabled);
   preferences.putString("btDeviceName", config.pairedDeviceName);
   preferences.putString("btDeviceAddr", config.pairedDeviceAddress);
+  preferences.putBool("btOverrideLocal", config.bluetoothOverrideLocal);
   preferences.putBool("btOverride", config.bluetoothOverrideLocal);
   preferences.putInt("btTimeout", config.bluetoothTimeoutMs);
   
@@ -1395,9 +1404,11 @@ void menu_task_func(void *pvParams) {
       return;
     }
   
-    Serial.println("Starting scheduler ...");
-    /* Start the scheduler. */
-    vTaskStartScheduler();
-    /* We'll never get here. */
-    for( ;; );
-  }
+  Serial.println("Starting scheduler ...");
+  /* Start the scheduler. */
+  vTaskStartScheduler();
+  /* We'll never get here. */
+  for( ;; );
+}
+
+#endif  // !GBG_VARIANT_FOOT_PEDAL
