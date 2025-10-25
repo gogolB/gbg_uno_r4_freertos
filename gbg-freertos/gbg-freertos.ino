@@ -312,6 +312,36 @@ struct BluetoothInput {
 
 volatile BluetoothInput bluetoothInput = {false, 0, 0, false, 0};
 
+volatile bool joystickDebugEnabled = false;
+volatile bool motorDebugEnabled = false;
+volatile bool bluetoothDebugEnabled = false;
+
+void setJoystickDebugPrinting(bool enabled) {
+  CRIT_BEGIN();
+  joystickDebugEnabled = enabled;
+  CRIT_END();
+}
+
+void setMotorDebugPrinting(bool enabled) {
+  CRIT_BEGIN();
+  motorDebugEnabled = enabled;
+  CRIT_END();
+}
+
+void setBluetoothDebugPrinting(bool enabled) {
+  CRIT_BEGIN();
+  bluetoothDebugEnabled = enabled;
+  CRIT_END();
+}
+
+void disableAllDebugPrinting() {
+  CRIT_BEGIN();
+  joystickDebugEnabled = false;
+  motorDebugEnabled = false;
+  bluetoothDebugEnabled = false;
+  CRIT_END();
+}
+
  void loop()
  {
    vTaskDelay(configTICK_RATE_HZ/4);
@@ -464,12 +494,21 @@ volatile int rightMotorPower = 0;
      int left_motor_current = md.getM1CurrentMilliamps();
      int right_motor_current = md.getM2CurrentMilliamps();
  
-     if (motorPrintCounter >= 10) {
-       //printf("[Motor Dr Thread] LRP=%5d, RRP=%5d, | LMAP=%5d, RMAP=%5d | LM_CUR=%5d mA, RM_CUR=%5d mA \n", 
-       //        leftMotorRequestedPower, rightMotorRequestedPower, leftMotorAppliedPower, rightMotorAppliedPower, left_motor_current, right_motor_current);
+     if (motorDebugEnabled) {
+       if (motorPrintCounter >= 10) {
+         printf("[Motor Thread] LRP=%5d, RRP=%5d | LMAP=%5d, RMAP=%5d | LM_CUR=%5d mA, RM_CUR=%5d mA\n",
+                leftMotorRequestedPower,
+                rightMotorRequestedPower,
+                leftMotorAppliedPower,
+                rightMotorAppliedPower,
+                left_motor_current,
+                right_motor_current);
+         motorPrintCounter = 0;
+       }
+       motorPrintCounter++;
+     } else {
        motorPrintCounter = 0;
      }
-     motorPrintCounter++;
  
      vTaskDelay(config.motorLoopDelayMs / portTICK_PERIOD_MS);
    }
@@ -595,13 +634,24 @@ volatile int rightMotorPower = 0;
        scaledX = scaledX ^ scaledY;
      }
 
-    if (joystickPrintCount >= 10 && !usingBluetoothInput)
-    {
-      //printf("[Joystick Thread] X=%4d, Y=%4d, Xc=%4d, Yc=%4d, Xs=%4d, Ys=%4d \n", xValue, yValue, correctedXValue, correctedYValue, scaledX, scaledY);
-      joystickPrintCount = 0;
-    }
-    if (!usingBluetoothInput) {
+    if (joystickDebugEnabled) {
+      if (joystickPrintCount >= 10) {
+        if (usingBluetoothInput) {
+          printf("[Joystick Thread] BT Xs=%4d, Ys=%4d\n", scaledX, scaledY);
+        } else {
+          printf("[Joystick Thread] X=%4d, Y=%4d, Xc=%4d, Yc=%4d, Xs=%4d, Ys=%4d\n",
+                 xValue,
+                 yValue,
+                 correctedXValue,
+                 correctedYValue,
+                 scaledX,
+                 scaledY);
+        }
+        joystickPrintCount = 0;
+      }
       joystickPrintCount++;
+    } else {
+      joystickPrintCount = 0;
     }
     
     } // End of !usingBluetoothInput block
@@ -660,12 +710,14 @@ volatile int rightMotorPower = 0;
  
  void bluetooth_func(void *pvParams) {
    // Setup
-   Serial.println("[Bluetooth Thread] Initializing Bluetooth...");
-   
-   if (!BLE.begin()) {
-     Serial.println("[Bluetooth Thread] Failed to initialize BLE!");
-     vTaskDelete(nullptr);
-     return;
+  if (bluetoothDebugEnabled) {
+    Serial.println("[Bluetooth Thread] Initializing Bluetooth...");
+  }
+  
+  if (!BLE.begin()) {
+    Serial.println("[Bluetooth Thread] Failed to initialize BLE!");
+    vTaskDelete(nullptr);
+    return;
    }
    
    // Set local name and advertised service
@@ -690,8 +742,10 @@ volatile int rightMotorPower = 0;
   publishMotorConfigResponse(MOTOR_CONFIG_ACK_IDLE);
    
    // Start advertising
-   BLE.advertise();
-   Serial.println("[Bluetooth Thread] Bluetooth ready and advertising...");
+  BLE.advertise();
+  if (bluetoothDebugEnabled) {
+    Serial.println("[Bluetooth Thread] Bluetooth ready and advertising...");
+  }
    
    unsigned long lastConnectionCheck = 0;
    bool wasConnected = false;
@@ -702,8 +756,10 @@ volatile int rightMotorPower = 0;
      // Check connection status
      bool isConnected = BLE.connected();
      
-     if (isConnected && !wasConnected) {
-      Serial.println("[Bluetooth Thread] Device connected!");
+    if (isConnected && !wasConnected) {
+      if (bluetoothDebugEnabled) {
+        Serial.println("[Bluetooth Thread] Device connected!");
+      }
 
       // Share the current configuration snapshot with the new central so it can
       // immediately display the robot's motor limits.
@@ -721,10 +777,14 @@ volatile int rightMotorPower = 0;
            strcpy(config.pairedDeviceName, "Unknown Device");
          }
          saveConfig();
-         Serial.println("[Bluetooth Thread] Device paired and saved: " + String(config.pairedDeviceName));
+         if (bluetoothDebugEnabled) {
+           Serial.println("[Bluetooth Thread] Device paired and saved: " + String(config.pairedDeviceName));
+         }
        }
     } else if (!isConnected && wasConnected) {
-       Serial.println("[Bluetooth Thread] Device disconnected!");
+      if (bluetoothDebugEnabled) {
+        Serial.println("[Bluetooth Thread] Device disconnected!");
+      }
        
       // Clear Bluetooth input when disconnected
       CRIT_BEGIN();
@@ -752,7 +812,9 @@ volatile int rightMotorPower = 0;
         bluetoothInput.lastUpdateTime = millis();
         CRIT_END();
          
-         printf("[Bluetooth Thread] Joystick data: X=%d, Y=%d\n", x, y);
+        if (bluetoothDebugEnabled) {
+          printf("[Bluetooth Thread] Joystick data: X=%d, Y=%d\n", x, y);
+        }
        }
        
        // Check for stop command
@@ -766,7 +828,9 @@ volatile int rightMotorPower = 0;
           bluetoothInput.lastUpdateTime = millis();
           CRIT_END();
 
-           Serial.println("[Bluetooth Thread] Stop command received!");
+          if (bluetoothDebugEnabled) {
+            Serial.println("[Bluetooth Thread] Stop command received!");
+          }
          }
        }
 
@@ -780,7 +844,9 @@ volatile int rightMotorPower = 0;
         }
 
         if (valueLength < static_cast<int>(MOTOR_CONFIG_PAYLOAD_SIZE)) {
-          Serial.println("[Bluetooth Thread] Motor config snapshot requested by central");
+          if (bluetoothDebugEnabled) {
+            Serial.println("[Bluetooth Thread] Motor config snapshot requested by central");
+          }
           publishMotorConfigResponse(MOTOR_CONFIG_ACK_CURRENT);
         } else {
           const uint8_t *payloadPtr = rawData;
@@ -795,7 +861,9 @@ volatile int rightMotorPower = 0;
           String errorMessage = "";
 
           if (!decodeMotorConfigPayload(payloadPtr, payloadLength, update, errorMessage)) {
-            Serial.println("[Bluetooth Thread] Motor config update rejected: " + errorMessage);
+            if (bluetoothDebugEnabled) {
+              Serial.println("[Bluetooth Thread] Motor config update rejected: " + errorMessage);
+            }
             publishMotorConfigResponse(MOTOR_CONFIG_ACK_FAILURE);
           } else {
             CRIT_BEGIN();
@@ -809,18 +877,20 @@ volatile int rightMotorPower = 0;
 
             saveConfig();
 
-            Serial.print("[Bluetooth Thread] Motor config updated. Fwd L/R: ");
-            Serial.print(config.maxFwdLeftMotorPower);
-            Serial.print("/");
-            Serial.print(config.maxFwdRightMotorPower);
-            Serial.print("  Bwd L/R: ");
-            Serial.print(config.maxBwdLeftMotorPower);
-            Serial.print("/");
-            Serial.print(config.maxBwdRightMotorPower);
-            Serial.print("  Inc: ");
-            Serial.print(config.motorPowerIncrement);
-            Serial.print("  Delay: ");
-            Serial.println(config.timeBtwnMotorIncrementMs);
+            if (bluetoothDebugEnabled) {
+              Serial.print("[Bluetooth Thread] Motor config updated. Fwd L/R: ");
+              Serial.print(config.maxFwdLeftMotorPower);
+              Serial.print("/");
+              Serial.print(config.maxFwdRightMotorPower);
+              Serial.print("  Bwd L/R: ");
+              Serial.print(config.maxBwdLeftMotorPower);
+              Serial.print("/");
+              Serial.print(config.maxBwdRightMotorPower);
+              Serial.print("  Inc: ");
+              Serial.print(config.motorPowerIncrement);
+              Serial.print("  Delay: ");
+              Serial.println(config.timeBtwnMotorIncrementMs);
+            }
 
             publishMotorConfigResponse(MOTOR_CONFIG_ACK_SUCCESS);
           }
@@ -831,7 +901,9 @@ volatile int rightMotorPower = 0;
       CRIT_BEGIN();
       if (bluetoothInput.active && (millis() - bluetoothInput.lastUpdateTime > config.bluetoothTimeoutMs)) {
         bluetoothInput.active = false;
-        Serial.println("[Bluetooth Thread] Bluetooth input timeout");
+        if (bluetoothDebugEnabled) {
+          Serial.println("[Bluetooth Thread] Bluetooth input timeout");
+        }
       }
       CRIT_END();
      }
@@ -840,7 +912,9 @@ volatile int rightMotorPower = 0;
      if (!isConnected && strlen(config.pairedDeviceAddress) > 0) {
        if (millis() - lastConnectionCheck > 10000) { // Check every 10 seconds
          lastConnectionCheck = millis();
-         Serial.println("[Bluetooth Thread] Attempting to reconnect to known device...");
+         if (bluetoothDebugEnabled) {
+           Serial.println("[Bluetooth Thread] Attempting to reconnect to known device...");
+         }
          // Note: ArduinoBLE doesn't support direct connection by address in peripheral mode
          // The device will need to reconnect to us
        }
@@ -862,6 +936,7 @@ void printMainMenu() {
   Serial.println("4. Bluetooth Settings");
   Serial.println("5. Save Settings to Flash");
   Serial.println("6. Reset to Defaults");
+  Serial.println("7. Debug Settings");
   Serial.println("0. Exit Menu");
   Serial.print("Enter choice: ");
 }
@@ -909,6 +984,16 @@ void printBluetoothMenu() {
   Serial.println("4. Enter Pairing Mode");
   Serial.println("5. Clear Paired Device");
   Serial.println("6. View Paired Device Info");
+  Serial.println("0. Back to Main Menu");
+  Serial.print("Enter choice: ");
+}
+
+void printDebugMenu() {
+  Serial.println("\n---- Debug Settings ----");
+  Serial.println("1. Joystick Debug Printing");
+  Serial.println("2. Motor Debug Printing");
+  Serial.println("3. Bluetooth Debug Printing");
+  Serial.println("4. Disable All Debug Printing");
   Serial.println("0. Back to Main Menu");
   Serial.print("Enter choice: ");
 }
@@ -1229,6 +1314,49 @@ void handleBluetoothSettings() {
   } while (choice != 0);
 }
 
+void handleDebugSettings() {
+  int choice;
+  do {
+    printDebugMenu();
+    choice = readIntegerInput(0, 4);
+    Serial.println(choice);
+
+    switch (choice) {
+      case 1: {
+        bool current = joystickDebugEnabled;
+        Serial.println("Joystick debug printing is currently: " + String(current ? "On" : "Off"));
+        Serial.print("Enable joystick debug printing (y/n): ");
+        bool enable = readBoolInput();
+        setJoystickDebugPrinting(enable);
+        Serial.println("Joystick debug printing set to: " + String(enable ? "On" : "Off"));
+        break;
+      }
+      case 2: {
+        bool current = motorDebugEnabled;
+        Serial.println("Motor debug printing is currently: " + String(current ? "On" : "Off"));
+        Serial.print("Enable motor debug printing (y/n): ");
+        bool enable = readBoolInput();
+        setMotorDebugPrinting(enable);
+        Serial.println("Motor debug printing set to: " + String(enable ? "On" : "Off"));
+        break;
+      }
+      case 3: {
+        bool current = bluetoothDebugEnabled;
+        Serial.println("Bluetooth debug printing is currently: " + String(current ? "On" : "Off"));
+        Serial.print("Enable Bluetooth debug printing (y/n): ");
+        bool enable = readBoolInput();
+        setBluetoothDebugPrinting(enable);
+        Serial.println("Bluetooth debug printing set to: " + String(enable ? "On" : "Off"));
+        break;
+      }
+      case 4:
+        disableAllDebugPrinting();
+        Serial.println("All debug printing disabled.");
+        break;
+    }
+  } while (choice != 0);
+}
+
 void menu_task_func(void *pvParams) {
   // Setup
   Serial.println("\n[Menu Task] Serial menu system initialized.");
@@ -1248,7 +1376,7 @@ void menu_task_func(void *pvParams) {
         int choice;
         do {
           printMainMenu();
-          choice = readIntegerInput(0, 6);
+          choice = readIntegerInput(0, 7);
           Serial.println(choice);
           
           switch (choice) {
@@ -1272,6 +1400,9 @@ void menu_task_func(void *pvParams) {
               initDefaultConfig();
               Serial.println("Settings reset to defaults!");
               break;
+            case 7:
+              handleDebugSettings();
+              break;
             case 0:
               Serial.println("Exiting menu...");
               break;
@@ -1282,6 +1413,9 @@ void menu_task_func(void *pvParams) {
         } while (choice != 0);
         
         Serial.println("\nSend 'm' to open the configuration menu again.");
+      } else if (input == 'd' || input == 'D') {
+        disableAllDebugPrinting();
+        Serial.println("[Menu Task] Debug printing disabled.");
       }
     }
     
